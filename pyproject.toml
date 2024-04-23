@@ -6,7 +6,9 @@ authors = ["Stepan Anokhin <stepan.anokhin@gmail.com>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.6"
+python = ">=3.8.1"
+flake8 = "^7.0.0"
+black = "^24.4.0"
 
 
 [build-system]

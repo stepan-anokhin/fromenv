@@ -11,7 +11,7 @@ pip install fromenv
 
 # Requirements
 
-Python version `^3.6`
+Python version `>=3.8.1`
 
 # Quick Start
 
