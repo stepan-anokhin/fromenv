@@ -3,9 +3,9 @@ from dataclasses import dataclass
 from typing import Type, Dict, TypeVar
 
 from fromenv.errors import MissingRequiredVar, AmbiguousVarError
-from fromenv.internal.data import DataClasses
+from fromenv.internal.data_classes import DataClasses
 from fromenv.internal.dicts import Dicts
-from fromenv.internal.value import Config, Value
+from fromenv.internal.value import Config, Value, Strategy, VarBinding
 
 T = TypeVar("T")
 
@@ -17,8 +17,11 @@ def from_env(data_class: Type[T], env: Dict[str, str] | None = None, config: Con
 
     env = env or os.environ
 
-    root_value = Value(ref=None, value_type=data_class, config=config)
-    return root_value.load(env)
+    config = config or Config()
+    strategy = Strategy(config)
+    root_value = strategy.root_value(data_class)
+    loader = strategy.resolve_loader(root_value)
+    return loader.load(VarBinding(env), root_value, strategy)
 
 
 @dataclass
@@ -36,5 +39,6 @@ class ServiceConfig:
 
 
 if __name__ == "__main__":
-    cfg = from_env(ServiceConfig, )
+    cfg = from_env(ServiceConfig, {"SECRET_PATH": "/some/path", "SERVER_HOST": "example.com", "SERVER_PORT": "8080",
+                                   "SERVER_RETRIES": "10"})
     print(cfg)

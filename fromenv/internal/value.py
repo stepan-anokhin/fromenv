@@ -1,108 +1,90 @@
 import abc
 import dataclasses
 from abc import abstractmethod
+from collections.abc import Mapping
 from dataclasses import dataclass
-from functools import cached_property
-from typing import Optional, Type, Any, Dict, Sequence, Tuple
+from typing import Type, Any, Dict, Sequence, Tuple
 
 from fromenv.errors import UnsupportedValueType, MissingRequiredVar, AmbiguousVarError
-from fromenv.internal.data import DataClasses
+from fromenv.internal.data_classes import DataClasses
+from fromenv.internal.dicts import Dicts
 
 
 @dataclass(frozen=True)
 class Config:
-    prefix: str | None = None  # Common prefix
-    sep: str = '_'  # Separator between variable name parts
-    loaders: Sequence["Loader"] | None = None
+    """Loading configuration."""
+    prefix: str | None = None
+    sep: str = '_'
 
 
+@dataclass
 class Value:
-    """This class represents an abstract value encoded by environment variables.
+    """Represents a value that should be loaded."""
+    type: Type
+    var_name: str
+    qual_name: str
 
-    Value instances form a tree reflecting actual data structure (where values representing
-    data structures or collections may have child values and values representing basic data
-    types will always be a leafs).
-    """
 
-    ref: Any  # Field name, list index or key by which the value is referenced
-    type: Type  # Actual value type
-    parent: Optional["Value"]  # Parent value
+@dataclass
+class Strategy:
+    """Strategy represents a configurable logic which should be common across all loaders."""
+
     config: Config
-    consumed: Dict[str, "Value"]  # Variable names consumed by some values, shared across all values in the tree.
-    loader: "Loader"
+    loaders: Sequence["Loader"] = dataclasses.field(default_factory=lambda: DEFAULT_LOADERS)
 
-    def __init__(
-            self,
-            ref: Any,
-            value_type: Type,
-            parent: Optional["Value"] = None,
-            config: Config = None,
-            consumed: Dict[str, "Value"] | None = None,
-            loader: "Loader" = None,
-    ):
-        self.ref = ref
-        self.type = value_type
-        self.parent = parent
-        self.config = config or Config()
-        self.consumed = consumed or {}
-        self.loader = loader or self._resolve_loader()
+    def child_value(self, parent: Value, ref: Any, value_type: Type) -> Value:
+        """Create child-value for the given one."""
+        var_name = self._var_name(parent, ref)
+        qual_name = self._qual_name(parent, ref)
+        return Value(type=value_type, var_name=var_name, qual_name=qual_name)
 
-    def _resolve_loader(self) -> "Loader":
-        """Resolve appropriate value loader."""
-        loaders = self.config.loaders or DEFAULT_LOADERS
-        for loader in loaders:
-            if loader.can_load(self.type):
+    def resolve_loader(self, value: Value) -> "Loader":
+        """Resolve loader appropriate for the given value."""
+        for loader in self.loaders:
+            if loader.can_load(value.type):
                 return loader
-        raise UnsupportedValueType(f"Value type is not supported: {self.type}")
+        raise UnsupportedValueType(f"Unsupported value type: {value.type}")
 
-    def consume(self):
-        """Consume variable name."""
-        if self.var_name in self.consumed:
-            other = self.consumed[self.var_name]
-            raise AmbiguousVarError(f"Variable '{self.var_name}' matched to multiple values:\n\t{self}\n\t{other}")
-        self.consumed[self.var_name] = self
-
-    def load(self, env: Dict[str, str]) -> Any:
-        """Load value from the variables."""
-        return self.loader.load(env, self)
-
-    def exists(self, env: Dict[str, str]) -> bool:
-        """Check if value is represented by the given environment variables."""
-        return self.loader.exists(env, self)
-
-    def nested(self, ref: Any, value_type: Type) -> "Value":
-        """Create nested value."""
+    def root_value(self, data_class: Type) -> Value:
+        """Create a root value."""
         return Value(
-            ref=ref,
-            value_type=value_type,
-            parent=self,
-            config=self.config,
-            consumed=self.consumed,
+            type=data_class,
+            var_name=self.config.prefix,
+            qual_name=data_class.__name__,
         )
 
-    @cached_property
-    def var_name(self) -> str:
-        """Get the corresponding variable name."""
-        if self.parent is None:
-            return self.config.prefix
-        this_name = str(self.ref).upper()
-        if self.parent.var_name is None:
-            return this_name
-        else:
-            return f'{self.parent.var_name}{self.config.sep}{this_name}'
+    def _var_name(self, parent: Value, ref: Any) -> str:
+        """Compute child-value name from parent-value and reference from parent to child."""
+        this_name = str(ref).upper()
+        if parent.var_name:
+            return f"{parent.var_name}{self.config.sep}{this_name}"
+        return this_name
 
-    @cached_property
-    def repr(self) -> str:
-        """Human-readable representation."""
-        if self.parent is None:
-            return self.type.__name__
-        if DataClasses.is_dataclass(self.parent.type):
-            return f'{self.parent.repr}.{self.ref}'
-        return f'{self.parent.repr}[{self.ref}]'
+    def _qual_name(self, parent: Value, ref: Any) -> str:
+        """Compute child qualified name from the given parent and value reference."""
+        if DataClasses.is_dataclass(parent.type):
+            return f"{parent.qual_name}.{ref}"
+        return f"{parent.qual_name}[{ref}]"
 
-    def __repr__(self) -> str:
-        """Get human-readable representation."""
-        return self.repr
+
+@dataclass
+class VarBinding:
+    """Environment variables mapped to the corresponding values."""
+    vars: Mapping[str, str]
+    bound: Dict[str, Value] = dataclasses.field(default_factory=dict)
+
+    def bind(self, value: Value):
+        """Bind variable to the given value"""
+        if value.var_name not in self.vars:
+            raise MissingRequiredVar(f"Variable '{value.var_name}' not found for required value: {value.qual_name}")
+        if value.var_name in self.bound:
+            other = self.bound[value.var_name]
+            raise AmbiguousVarError(
+                f"Variable '{value.var_name}' is matched to multiple values:"
+                f"\n\t1. {other.qual_name}"
+                f"\n\t2. {value.qual_name}"
+            )
+        self.bound[value.var_name] = value
 
 
 class Loader(abc.ABC):
@@ -110,15 +92,15 @@ class Loader(abc.ABC):
 
     @abstractmethod
     def can_load(self, value_type: Type) -> bool:
-        """Check if the loader can handle the given value type."""
+        """Check if loader can handle value type."""
 
     @abstractmethod
-    def load(self, env: Dict[str, str], value: Value) -> Any:
+    def load(self, env: VarBinding, value: Value, strategy: Strategy) -> Any:
         """Do load value from the environment variables."""
 
     @abstractmethod
-    def exists(self, env: Dict[str, str], value: Value) -> bool:
-        """Check if value is present among the given environment variables."""
+    def is_present(self, env: VarBinding, value: Value, strategy: Strategy) -> bool:
+        """Check if variables representing the given value are defined."""
 
 
 class BasicValueLoader(Loader):
@@ -132,14 +114,15 @@ class BasicValueLoader(Loader):
         """Check if the given value type could be handled."""
         return value_type is self.type
 
-    def load(self, env: Dict[str, str], value: Value) -> Any:
+    def load(self, env: VarBinding, value: Value, strategy: Strategy) -> Any:
         """Do load value."""
-        value.consume()
-        return self.type(env[value.var_name])
+        env.bind(value)
+        raw_value = env.vars[value.var_name]
+        return self.type(raw_value)
 
-    def exists(self, env: Dict[str, str], value: Value) -> bool:
+    def is_present(self, env: VarBinding, value: Value, strategy: Strategy) -> bool:
         """Check if value is represented by the given environment variables."""
-        return value.var_name in env
+        return value.var_name in env.vars and value.var_name not in env.bound
 
 
 class BooleanLoader(BasicValueLoader):
@@ -148,10 +131,10 @@ class BooleanLoader(BasicValueLoader):
     def __init__(self):
         super().__init__(bool)
 
-    def load(self, env: Dict[str, str], value: Value) -> bool:
+    def load(self, env: VarBinding, value: Value, strategy: Strategy) -> bool:
         """Load boolean value."""
-        value.consume()
-        raw_value: str = env[value.var_name]
+        env.bind(value)
+        raw_value: str = env.vars[value.var_name]
         return raw_value.upper() == "TRUE" or raw_value == "1"
 
 
@@ -162,22 +145,25 @@ class DataClassLoader(Loader):
         """Check if the requested value type is a data class."""
         return DataClasses.is_dataclass(value_type)
 
-    def load(self, env: Dict[str, str], value: Value) -> Any:
+    def load(self, env: VarBinding, value: Value, strategy: Strategy) -> Any:
         """Do load data class instance."""
+        data_class: Type = value.type
         constructor_arguments: Dict[str, Any] = {}
-        for field in dataclasses.fields(value.type):
-            nested = value.nested(field.name, field.type)
-            exists = nested.exists(env)
-            if DataClasses.is_required(field) and not exists:
-                raise MissingRequiredVar(f"Required field is missing: {nested}")
-            if exists:
-                constructor_arguments[field.name] = nested.load(env)
-        return value.type(**constructor_arguments)
+        for field in dataclasses.fields(data_class):
+            field_value = strategy.child_value(value, field.name, field.type)
+            field_loader = strategy.resolve_loader(field_value)
+            is_present = field_loader.is_present(env, field_value, strategy)
+            if DataClasses.is_required(field) and not is_present:
+                raise MissingRequiredVar(f"Required field is missing: {field_value.qual_name}")
+            if is_present:
+                constructor_arguments[field.name] = field_loader.load(env, field_value, strategy)
+        return data_class(**constructor_arguments)
 
-    def exists(self, env: Dict[str, str], value: Value) -> bool:
+    def is_present(self, env: VarBinding, value: Value, strategy: Strategy) -> bool:
         """Check if required fields are present."""
         for field in DataClasses.required_fields(value.type):
-            if not value.nested(field.name, field.type).exists(env):
+            field_value = strategy.child_value(value, field.name, field.type)
+            if not Dicts.any(env.vars, query=Dicts.prefix(field_value.var_name)):
                 return False
         return True
 

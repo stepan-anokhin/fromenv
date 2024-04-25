@@ -1,6 +1,7 @@
 """Provides utility-functions to work with dictionaries."""
 
 import re
+from typing import Mapping, Any
 
 from fromenv.internal.types import DictQuery, DictItem, EnvDict
 
@@ -33,11 +34,11 @@ class Dicts:
         return predicate
 
     @staticmethod
-    def select(env: EnvDict, query: DictQuery) -> EnvDict:
+    def select(mapping: Mapping, query: DictQuery) -> EnvDict:
         """Select dict subset."""
-        return dict(filter(query, env.items()))
+        return dict(filter(query, mapping.items()))
 
     @staticmethod
-    def any(env: EnvDict, query: DictQuery) -> bool:
+    def any(mapping: Mapping[Any, Any], query: DictQuery) -> bool:
         """Check if any entry satisfies query."""
-        return any(map(query, env.items()))
+        return any(map(query, mapping.items()))
