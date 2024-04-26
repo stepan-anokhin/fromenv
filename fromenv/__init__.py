@@ -4,7 +4,7 @@ from typing import Type, Dict, TypeVar
 from fromenv.errors import MissingRequiredVar, AmbiguousVarError
 from fromenv.internal.data_classes import DataClasses
 from fromenv.internal.dicts import Dicts
-from fromenv.internal.value import Config, Value, Strategy, VarBinding
+from fromenv.internal.loaders import Config, Value, Strategy, VarBinding
 
 # Specify exported symbols
 __all__ = (

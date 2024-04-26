@@ -1,6 +1,6 @@
 import dataclasses
 from dataclasses import dataclass
-from typing import Union
+from typing import Union, List
 
 from fromenv import from_env
 
@@ -54,10 +54,10 @@ def test_metadata():
 def test_default():
     @dataclass
     class TestData:
-        optional: str = "default-value"
+        optional: str = "default"
 
-    assert from_env(TestData, {}).optional == "default-value"
-    assert from_env(TestData, {"OPTIONAL": "specified-value"}).optional == "specified-value"
+    assert from_env(TestData, {}).optional == "default"
+    assert from_env(TestData, {"OPTIONAL": "specified"}).optional == "specified"
 
 
 def test_union():
@@ -69,3 +69,27 @@ def test_union():
     data = from_env(TestData, {"OR_TYPE_FIELD": "10", "UNION_FIELD": "10"})
     assert data.or_type_field == "10"
     assert data.union_field == 10
+
+
+def test_list():
+    @dataclass
+    class ItemType:
+        required: int
+        optional: str = "default"
+
+    @dataclass
+    class TestData:
+        nested_list: List[ItemType]
+        basic_list: list[int]
+
+    assert from_env(TestData, {}) == TestData([], [])
+    assert from_env(TestData, {
+        "NESTED_LIST_0_REQUIRED": "0",
+        "NESTED_LIST_1_REQUIRED": "1",
+        "NESTED_LIST_1_OPTIONAL": "specified"
+    }).nested_list == [
+               ItemType(0),
+               ItemType(1, "specified")
+           ]
+
+    assert from_env(TestData, {"BASIC_LIST_0": "100", "BASIC_LIST_1": "200"}).basic_list == [100, 200]

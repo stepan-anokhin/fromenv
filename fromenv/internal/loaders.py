@@ -5,7 +5,7 @@ import typing
 from abc import abstractmethod
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Type, Any, Dict, Sequence, Tuple
+from typing import Type, Any, Dict, Sequence, Tuple, List
 
 from fromenv.consts import FROM_ENV
 from fromenv.errors import UnsupportedValueType, MissingRequiredVar, AmbiguousVarError
@@ -37,8 +37,8 @@ class Strategy:
 
     def child_value(self, parent: Value, ref: Any, value_type: Type) -> Value:
         """Create child-value for the given one."""
-        var_name = self._var_name(parent, ref)
-        qual_name = self._qual_name(parent, ref)
+        var_name = self.child_var_name(parent, ref)
+        qual_name = self.child_qual_name(parent, ref)
         return Value(type=value_type, var_name=var_name, qual_name=qual_name)
 
     def resolve_loader(self, value: Value) -> "Loader":
@@ -56,14 +56,14 @@ class Strategy:
             qual_name=data_class.__name__,
         )
 
-    def _var_name(self, parent: Value, ref: Any) -> str:
+    def child_var_name(self, parent: Value, ref: Any) -> str:
         """Compute child-value name from parent-value and reference from parent to child."""
         this_name = str(ref).upper()
         if parent.var_name:
             return f"{parent.var_name}{self.config.sep}{this_name}"
         return this_name
 
-    def _qual_name(self, parent: Value, ref: Any) -> str:
+    def child_qual_name(self, parent: Value, ref: Any) -> str:
         """Compute child qualified name from the given parent and value reference."""
         if DataClasses.is_dataclass(parent.type):
             return f"{parent.qual_name}.{ref}"
@@ -207,6 +207,46 @@ class UnionLoader(Loader):
         return False
 
 
+class ListLoader(Loader):
+    """List loader."""
+
+    def can_load(self, value_type: Type) -> bool:
+        """Check if the value type is list."""
+        origin = typing.get_origin(value_type)
+        return (
+                value_type == list or
+                origin is list or
+                origin is List or
+                origin is typing.Sequence
+        )
+
+    def load(self, env: VarBinding, value: Value, strategy: Strategy) -> List:
+        """Do load list value."""
+        items: List = []
+        item_type: Type = self._item_type(value.type)
+        current_index: int = 0
+        current_item: Value = strategy.child_value(value, current_index, item_type)
+        item_loader: Loader = strategy.resolve_loader(current_item)
+        while item_loader.is_present(env, current_item, strategy):
+            loaded_item = item_loader.load(env, current_item, strategy)
+            items.append(loaded_item)
+            current_index += 1
+            current_item = strategy.child_value(value, current_index, item_type)
+        return items
+
+    @staticmethod
+    def _item_type(list_type: Type) -> Type:
+        """Get item type."""
+        type_args: Tuple[Type, ...] = typing.get_args(list_type)
+        if not type_args:
+            raise UnsupportedValueType(f"Cannot load untyped list: {list_type}")
+        return type_args[0]
+
+    def is_present(self, env: VarBinding, value: Value, strategy: Strategy) -> bool:
+        """Check if list is present."""
+        return True  # List may be empty in which case it is not present.
+
+
 DEFAULT_LOADERS: Tuple[Loader, ...] = (
     BasicValueLoader(int),
     BasicValueLoader(float),
@@ -214,4 +254,5 @@ DEFAULT_LOADERS: Tuple[Loader, ...] = (
     BooleanLoader(),
     DataClassLoader(),
     UnionLoader(),
+    ListLoader(),
 )
