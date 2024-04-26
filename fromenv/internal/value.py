@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Type, Any, Dict, Sequence, Tuple
 
+from fromenv.consts import FROM_ENV
 from fromenv.errors import UnsupportedValueType, MissingRequiredVar, AmbiguousVarError
 from fromenv.internal.data_classes import DataClasses
 from fromenv.internal.dicts import Dicts
@@ -151,6 +152,7 @@ class DataClassLoader(Loader):
         constructor_arguments: Dict[str, Any] = {}
         for field in dataclasses.fields(data_class):
             field_value = strategy.child_value(value, field.name, field.type)
+            self._apply_metadata(field_value, field.metadata)
             field_loader = strategy.resolve_loader(field_value)
             is_present = field_loader.is_present(env, field_value, strategy)
             if DataClasses.is_required(field) and not is_present:
@@ -158,6 +160,11 @@ class DataClassLoader(Loader):
             if is_present:
                 constructor_arguments[field.name] = field_loader.load(env, field_value, strategy)
         return data_class(**constructor_arguments)
+
+    def _apply_metadata(self, value: Value, metadata: Mapping):
+        """Honor data class field metadata."""
+        if FROM_ENV in metadata:
+            value.var_name = str(metadata[FROM_ENV])
 
     def is_present(self, env: VarBinding, value: Value, strategy: Strategy) -> bool:
         """Check if required fields are present."""
