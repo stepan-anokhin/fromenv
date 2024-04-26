@@ -1,5 +1,7 @@
 import abc
 import dataclasses
+import types
+import typing
 from abc import abstractmethod
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -177,10 +179,39 @@ class DataClassLoader(Loader):
         return True
 
 
+class UnionLoader(Loader):
+    """Loader to handle Union-types."""
+
+    def can_load(self, value_type: Type) -> bool:
+        """Check if this is a union class."""
+        origin = typing.get_origin(value_type)
+        return origin is typing.Union or origin is types.UnionType
+
+    def load(self, env: VarBinding, value: Value, strategy: Strategy) -> Any:
+        """Do load union-typed value."""
+        for actual_type in typing.get_args(value.type):
+            casted = dataclasses.replace(value, type=actual_type)
+            loader = strategy.resolve_loader(casted)
+            if loader.is_present(env, casted, strategy):
+                return loader.load(env, casted, strategy)
+        raise MissingRequiredVar(
+            f"Failed to load {value.qual_name} because none of the {value.type} types are present.")
+
+    def is_present(self, env: VarBinding, value: Value, strategy: Strategy) -> bool:
+        """Check if some of the united types could be loaded."""
+        for actual_type in typing.get_args(value.type):
+            casted = dataclasses.replace(value, type=actual_type)
+            loader = strategy.resolve_loader(casted)
+            if loader.is_present(env, casted, strategy):
+                return True
+        return False
+
+
 DEFAULT_LOADERS: Tuple[Loader, ...] = (
     BasicValueLoader(int),
     BasicValueLoader(float),
     BasicValueLoader(str),
     BooleanLoader(),
     DataClassLoader(),
+    UnionLoader(),
 )

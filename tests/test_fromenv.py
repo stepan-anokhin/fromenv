@@ -1,5 +1,6 @@
 import dataclasses
 from dataclasses import dataclass
+from typing import Union
 
 from fromenv import from_env
 
@@ -57,3 +58,14 @@ def test_default():
 
     assert from_env(TestData, {}).optional == "default-value"
     assert from_env(TestData, {"OPTIONAL": "specified-value"}).optional == "specified-value"
+
+
+def test_union():
+    @dataclass
+    class TestData:
+        or_type_field: str | int
+        union_field: Union[int, str]
+
+    data = from_env(TestData, {"OR_TYPE_FIELD": "10", "UNION_FIELD": "10"})
+    assert data.or_type_field == "10"
+    assert data.union_field == 10
