@@ -11,7 +11,7 @@ python = "^3.6"
 [tool.poetry.group.dev.dependencies]
 flake8 = { version = "^7.0.0", python = ">=3.8.1" }
 black = { version = "24.4.0", python = "^3.8" }
-
+pytest = { version = ">=8.1.1", python = "^3.8" }
 
 [build-system]
 requires = ["poetry-core"]

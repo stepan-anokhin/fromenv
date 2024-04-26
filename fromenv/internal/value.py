@@ -89,7 +89,7 @@ class VarBinding:
 
 
 class Loader(abc.ABC):
-    """Abstract base class for value loaders."""
+    """Loader encapsulate type-specific loading logic."""
 
     @abstractmethod
     def can_load(self, value_type: Type) -> bool:
@@ -156,7 +156,9 @@ class DataClassLoader(Loader):
             field_loader = strategy.resolve_loader(field_value)
             is_present = field_loader.is_present(env, field_value, strategy)
             if DataClasses.is_required(field) and not is_present:
-                raise MissingRequiredVar(f"Required field is missing: {field_value.qual_name}")
+                raise MissingRequiredVar(
+                    f"Variable is missing: {field_value.var_name} "
+                    f"(required for {field_value.qual_name})")
             if is_present:
                 constructor_arguments[field.name] = field_loader.load(env, field_value, strategy)
         return data_class(**constructor_arguments)
