@@ -16,13 +16,15 @@ from fromenv.internal.dicts import Dicts
 @dataclass(frozen=True)
 class Config:
     """Loading configuration."""
+
     prefix: str | None = None
-    sep: str = '_'
+    sep: str = "_"
 
 
 @dataclass
 class Value:
     """Represents a value that should be loaded."""
+
     type: Type
     var_name: str
     qual_name: str
@@ -73,6 +75,7 @@ class Strategy:
 @dataclass
 class VarBinding:
     """Environment variables mapped to the corresponding values."""
+
     vars: Mapping[str, str]
     bound: Dict[str, Value] = dataclasses.field(default_factory=dict)
 
@@ -108,6 +111,7 @@ class Loader(abc.ABC):
 
 class BasicValueLoader(Loader):
     """Base class for basic value loaders."""
+
     type: Type
 
     def __init__(self, value_type: Type):
@@ -159,8 +163,8 @@ class DataClassLoader(Loader):
             is_present = field_loader.is_present(env, field_value, strategy)
             if DataClasses.is_required(field) and not is_present:
                 raise MissingRequiredVar(
-                    f"Variable is missing: {field_value.var_name} "
-                    f"(required for {field_value.qual_name})")
+                    f"Variable is missing: {field_value.var_name} " f"(required for {field_value.qual_name})"
+                )
             if is_present:
                 constructor_arguments[field.name] = field_loader.load(env, field_value, strategy)
         return data_class(**constructor_arguments)
@@ -195,7 +199,8 @@ class UnionLoader(Loader):
             if loader.is_present(env, casted, strategy):
                 return loader.load(env, casted, strategy)
         raise MissingRequiredVar(
-            f"Failed to load {value.qual_name} because none of the {value.type} types are present.")
+            f"Failed to load {value.qual_name} because none of the {value.type} types are present."
+        )
 
     def is_present(self, env: VarBinding, value: Value, strategy: Strategy) -> bool:
         """Check if some of the united types could be loaded."""
@@ -213,12 +218,7 @@ class ListLoader(Loader):
     def can_load(self, value_type: Type) -> bool:
         """Check if the value type is list."""
         origin = typing.get_origin(value_type)
-        return (
-                value_type == list or
-                origin is list or
-                origin is List or
-                origin is typing.Sequence
-        )
+        return value_type == list or origin is list or origin is List or origin is typing.Sequence
 
     def load(self, env: VarBinding, value: Value, strategy: Strategy) -> List:
         """Do load list value."""

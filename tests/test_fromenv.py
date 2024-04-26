@@ -83,13 +83,13 @@ def test_list():
         basic_list: list[int]
 
     assert from_env(TestData, {}) == TestData([], [])
-    assert from_env(TestData, {
-        "NESTED_LIST_0_REQUIRED": "0",
-        "NESTED_LIST_1_REQUIRED": "1",
-        "NESTED_LIST_1_OPTIONAL": "specified"
-    }).nested_list == [
-               ItemType(0),
-               ItemType(1, "specified")
-           ]
+    assert from_env(
+        TestData,
+        {
+            "NESTED_LIST_0_REQUIRED": "0",
+            "NESTED_LIST_1_REQUIRED": "1",
+            "NESTED_LIST_1_OPTIONAL": "specified",
+        },
+    ).nested_list == [ItemType(0), ItemType(1, "specified")]
 
     assert from_env(TestData, {"BASIC_LIST_0": "100", "BASIC_LIST_1": "200"}).basic_list == [100, 200]
