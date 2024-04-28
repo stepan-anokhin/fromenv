@@ -1,6 +1,6 @@
 import dataclasses
 from dataclasses import dataclass
-from typing import Union, List
+from typing import Union, List, Tuple
 
 from fromenv import from_env
 
@@ -93,3 +93,27 @@ def test_list():
     ).nested_list == [ItemType(0), ItemType(1, "specified")]
 
     assert from_env(TestData, {"BASIC_LIST_0": "100", "BASIC_LIST_1": "200"}).basic_list == [100, 200]
+
+
+def test_var_tuple():
+    @dataclass
+    class ItemType:
+        required: int
+        optional: str = "default"
+
+    @dataclass
+    class TestData:
+        nested_tuple: Tuple[ItemType, ...]
+        basic_tuple: tuple[int, ...]
+
+    assert from_env(TestData, {}) == TestData((), ())
+    assert from_env(
+        TestData,
+        {
+            "NESTED_TUPLE_0_REQUIRED": "0",
+            "NESTED_TUPLE_1_REQUIRED": "1",
+            "NESTED_TUPLE_1_OPTIONAL": "specified",
+        },
+    ).nested_tuple == (ItemType(0), ItemType(1, "specified"))
+
+    assert from_env(TestData, {"BASIC_TUPLE_0": "100", "BASIC_TUPLE_1": "200"}).basic_tuple == (100, 200)

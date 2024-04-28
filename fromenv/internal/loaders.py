@@ -11,6 +11,7 @@ from fromenv.consts import FROM_ENV
 from fromenv.errors import UnsupportedValueType, MissingRequiredVar, AmbiguousVarError
 from fromenv.internal.data_classes import DataClasses
 from fromenv.internal.dicts import Dicts
+from fromenv.internal.tuples import Tuples
 
 
 @dataclass(frozen=True)
@@ -223,7 +224,7 @@ class ListLoader(Loader):
     def load(self, env: VarBinding, value: Value, strategy: Strategy) -> List:
         """Do load list value."""
         items: List = []
-        item_type: Type = self._item_type(value.type)
+        item_type: Type = self._item_type(value)
         current_index: int = 0
         current_item: Value = strategy.child_value(value, current_index, item_type)
         item_loader: Loader = strategy.resolve_loader(current_item)
@@ -235,16 +236,65 @@ class ListLoader(Loader):
         return items
 
     @staticmethod
-    def _item_type(list_type: Type) -> Type:
+    def _item_type(value: Value) -> Type:
         """Get item type."""
-        type_args: Tuple[Type, ...] = typing.get_args(list_type)
+        type_args: Tuple[Type, ...] = typing.get_args(value.type)
         if not type_args:
-            raise UnsupportedValueType(f"Cannot load untyped list: {list_type}")
+            raise UnsupportedValueType(f"Cannot load untyped list: {value.qual_name}:{value.type}")
         return type_args[0]
 
     def is_present(self, env: VarBinding, value: Value, strategy: Strategy) -> bool:
         """Check if list is present."""
-        return True  # List may be empty in which case it is not present.
+        return True  # List may be empty in which case it is also present.
+
+
+class TupleLoader(Loader):
+    """Tuple loader."""
+
+    def can_load(self, value_type: Type) -> bool:
+        """Check if value type is tuple."""
+        origin = typing.get_origin(value_type)
+        return value_type == tuple or origin is tuple or origin is typing.Tuple
+
+    def load(self, env: VarBinding, value: Value, strategy: Strategy) -> Any:
+        """Do load the tuple."""
+        if Tuples.is_variable(value.type):
+            return self._load_variable_tuple(env, value, strategy)
+        elif Tuples.is_fixed(value.type):
+            return self._load_fixed_tuple(env, value, strategy)
+        elif Tuples.is_untyped(value.type):
+            raise UnsupportedValueType(f"Cannot load untyped tuple: {value.qual_name}:{value.type}")
+        raise ValueError(f"Not a tuple type: {value.type}")
+
+    @staticmethod
+    def _load_variable_tuple(env: VarBinding, value: Value, strategy: Strategy) -> Any:
+        """Load tuple of any length."""
+        item_type = Tuples.item_type(value.type)
+        current_index: int = 0
+        current_item: Value = strategy.child_value(value, current_index, item_type)
+        item_loader: Loader = strategy.resolve_loader(current_item)
+        items: List[Any] = []
+        while item_loader.is_present(env, current_item, strategy):
+            item_value = item_loader.load(env, current_item, strategy)
+            items.append(item_value)
+            current_index += 1
+            current_item: Value = strategy.child_value(value, current_index, item_type)
+        return tuple(items)
+
+    @staticmethod
+    def _load_fixed_tuple(env: VarBinding, value: Value, strategy: Strategy) -> Any:
+        """Load tuple of any length."""
+        items: List[Any] = []
+        item_types = typing.get_args(value.type)
+        for index, item_type in enumerate(item_types):
+            item = strategy.child_value(value, index, item_type)
+            item_loader = strategy.resolve_loader(item)
+            items.append(item_loader.load(env, item, strategy))
+        return tuple(items)
+
+    def is_present(self, env: VarBinding, value: Value, strategy: Strategy) -> bool:
+        """Check if tuple is present."""
+        return True  # Tuple may be empty in which case it is also present
 
 
 DEFAULT_LOADERS: Tuple[Loader, ...] = (
@@ -255,4 +305,5 @@ DEFAULT_LOADERS: Tuple[Loader, ...] = (
     DataClassLoader(),
     UnionLoader(),
     ListLoader(),
+    TupleLoader(),
 )
