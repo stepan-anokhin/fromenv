@@ -9,9 +9,10 @@ from typing import Type, Any, Dict, Sequence, Tuple, List
 
 from fromenv.consts import FROM_ENV
 from fromenv.errors import UnsupportedValueType, MissingRequiredVar, AmbiguousVarError
-from fromenv.internal.data_classes import DataClasses
-from fromenv.internal.dicts import Dicts
-from fromenv.internal.tuples import Tuples
+from fromenv.internal.helpers.data_classes import DataClasses
+from fromenv.internal.helpers.dicts import Dicts
+from fromenv.internal.helpers.optionals import OptionalTypes
+from fromenv.internal.helpers.tuples import Tuples
 
 
 @dataclass(frozen=True)
@@ -49,7 +50,7 @@ class Strategy:
         for loader in self.loaders:
             if loader.can_load(value.type):
                 return loader
-        raise UnsupportedValueType(f"Unsupported value type: {value.type}")
+        raise UnsupportedValueType(f"Unsupported type: {value.type} of a field {value.qual_name}")
 
     def root_value(self, data_class: Type) -> Value:
         """Create a root value."""
@@ -162,10 +163,13 @@ class DataClassLoader(Loader):
             self._apply_metadata(field_value, field.metadata)
             field_loader = strategy.resolve_loader(field_value)
             is_present = field_loader.is_present(env, field_value, strategy)
-            if DataClasses.is_required(field) and not is_present:
+            is_optional = OptionalTypes.is_optional(field_value.type)
+            if DataClasses.is_required(field) and not is_optional and not is_present:
                 raise MissingRequiredVar(
                     f"Variable is missing: {field_value.var_name} " f"(required for {field_value.qual_name})"
                 )
+            if DataClasses.is_required(field) and is_optional and not is_present:
+                constructor_arguments[field.name] = None
             if is_present:
                 constructor_arguments[field.name] = field_loader.load(env, field_value, strategy)
         return data_class(**constructor_arguments)
@@ -297,7 +301,32 @@ class TupleLoader(Loader):
         return True  # Tuple may be empty in which case it is also present
 
 
+class OptionalLoader(Loader):
+    """Optional type loader."""
+
+    def can_load(self, value_type: Type) -> bool:
+        """Check if type is optional."""
+        return OptionalTypes.is_optional(value_type)
+
+    def load(self, env: VarBinding, value: Value, strategy: Strategy) -> Any:
+        """Load optional value."""
+        actual_type = OptionalTypes.remove_optional(value.type)
+        actual_value = dataclasses.replace(value, type=actual_type)
+        loader = strategy.resolve_loader(actual_value)
+        if loader.is_present(env, actual_value, strategy):
+            return loader.load(env, actual_value, strategy)
+        return None
+
+    def is_present(self, env: VarBinding, value: Value, strategy: Strategy) -> bool:
+        """Check if value is present."""
+        actual_type = OptionalTypes.remove_optional(value.type)
+        actual_value = dataclasses.replace(value, type=actual_type)
+        loader = strategy.resolve_loader(actual_value)
+        return loader.is_present(env, actual_value, strategy)
+
+
 DEFAULT_LOADERS: Tuple[Loader, ...] = (
+    OptionalLoader(),
     BasicValueLoader(int),
     BasicValueLoader(float),
     BasicValueLoader(str),

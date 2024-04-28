@@ -2,7 +2,7 @@ import os
 from typing import Type, Dict, TypeVar
 
 from fromenv.errors import MissingRequiredVar, AmbiguousVarError
-from fromenv.internal.data_classes import DataClasses
+from fromenv.internal.helpers.data_classes import DataClasses
 from fromenv.internal.loaders import Config, Strategy, VarBinding
 
 # Specify exported symbols
