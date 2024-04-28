@@ -12,9 +12,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v2
+      - name: Install poetry
+        run: pip install poetry
       - name: Install dependencies
-        run: pip install .[dev]
+        run: poetry install
       - name: Check code style
-        run: black --line-length 120 fromenv tests
+        run: poetry run black --line-length 120 fromenv tests
       - name: Lint the code
-        run: flake8 fromenv tests --count --max-complexity=10 --max-line-length=120 --statistics
+        run: poetry run flake8 fromenv tests --count --max-complexity=10 --max-line-length=120 --statistics
