@@ -1,8 +1,10 @@
 import dataclasses
+import json
 from dataclasses import dataclass
 from typing import Union, List, Tuple, Optional
 
 from fromenv import from_env
+from fromenv.model import Metadata
 
 
 def test_basic():
@@ -134,3 +136,20 @@ def test_optional():
     assert from_env(TestData, {"NESTED_OPTIONAL": "42"}) == TestData(Nested(42), None, None)
     assert from_env(TestData, {"UNION_BASIC": "specified"}) == TestData(None, "specified", None)
     assert from_env(TestData, {"OPTIONAL_BASIC": "specified"}) == TestData(None, None, "specified")
+
+
+def test_metadata_name():
+    @dataclass
+    class TestData:
+        first_field: int = dataclasses.field(metadata={"fromenv": "FIRST"})
+        second_field: bool = dataclasses.field(metadata={"fromenv": Metadata(name="SECOND")})
+
+    assert from_env(TestData, {"FIRST": "42", "SECOND": "true"}) == TestData(42, True)
+
+
+def test_custom_loader():
+    @dataclass
+    class TestData:
+        field_name: List[int] = dataclasses.field(metadata={"fromenv": Metadata(load=json.loads)})
+
+    assert from_env(TestData, {"FIELD_NAME": "[1, 2, 3]"}) == TestData([1, 2, 3])

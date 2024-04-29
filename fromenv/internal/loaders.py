@@ -13,6 +13,7 @@ from fromenv.internal.helpers.data_classes import DataClasses
 from fromenv.internal.helpers.dicts import Dicts
 from fromenv.internal.helpers.optionals import OptionalTypes
 from fromenv.internal.helpers.tuples import Tuples
+from fromenv.model import Metadata
 
 
 @dataclass(frozen=True)
@@ -30,6 +31,7 @@ class Value:
     type: Type
     var_name: str
     qual_name: str
+    metadata: Metadata | None = None
 
 
 @dataclass
@@ -39,16 +41,18 @@ class Strategy:
     config: Config
     loaders: Sequence["Loader"] = dataclasses.field(default_factory=lambda: DEFAULT_LOADERS)
 
-    def child_value(self, parent: Value, ref: Any, value_type: Type) -> Value:
+    def child_value(self, parent: Value, ref: Any, value_type: Type, metadata: Metadata | None = None) -> Value:
         """Create child-value for the given one."""
         var_name = self.child_var_name(parent, ref)
         qual_name = self.child_qual_name(parent, ref)
-        return Value(type=value_type, var_name=var_name, qual_name=qual_name)
+        if metadata is not None and metadata.name is not None:
+            var_name = metadata.name
+        return Value(type=value_type, var_name=var_name, qual_name=qual_name, metadata=metadata)
 
     def resolve_loader(self, value: Value) -> "Loader":
         """Resolve loader appropriate for the given value."""
         for loader in self.loaders:
-            if loader.can_load(value.type):
+            if loader.can_load(value):
                 return loader
         raise UnsupportedValueType(f"Unsupported type: {value.type} of a field {value.qual_name}")
 
@@ -99,7 +103,7 @@ class Loader(abc.ABC):
     """Loader encapsulate type-specific loading logic."""
 
     @abstractmethod
-    def can_load(self, value_type: Type) -> bool:
+    def can_load(self, value: Value) -> bool:
         """Check if loader can handle value type."""
 
     @abstractmethod
@@ -119,9 +123,9 @@ class BasicValueLoader(Loader):
     def __init__(self, value_type: Type):
         self.type = value_type
 
-    def can_load(self, value_type: Type) -> bool:
+    def can_load(self, value: Value) -> bool:
         """Check if the given value type could be handled."""
-        return value_type is self.type
+        return value.type is self.type
 
     def load(self, env: VarBinding, value: Value, strategy: Strategy) -> Any:
         """Do load value."""
@@ -150,17 +154,17 @@ class BooleanLoader(BasicValueLoader):
 class DataClassLoader(Loader):
     """Data class loader."""
 
-    def can_load(self, value_type: Type) -> bool:
+    def can_load(self, value: Value) -> bool:
         """Check if the requested value type is a data class."""
-        return DataClasses.is_dataclass(value_type)
+        return DataClasses.is_dataclass(value.type)
 
     def load(self, env: VarBinding, value: Value, strategy: Strategy) -> Any:
         """Do load data class instance."""
         data_class: Type = value.type
         constructor_arguments: Dict[str, Any] = {}
         for field in dataclasses.fields(data_class):
-            field_value = strategy.child_value(value, field.name, field.type)
-            self._apply_metadata(field_value, field.metadata)
+            metadata: Metadata = self._resolve_metadata(value, field)
+            field_value = strategy.child_value(value, field.name, field.type, metadata)
             field_loader = strategy.resolve_loader(field_value)
             is_present = field_loader.is_present(env, field_value, strategy)
             is_optional = OptionalTypes.is_optional(field_value.type)
@@ -174,10 +178,19 @@ class DataClassLoader(Loader):
                 constructor_arguments[field.name] = field_loader.load(env, field_value, strategy)
         return data_class(**constructor_arguments)
 
-    def _apply_metadata(self, value: Value, metadata: Mapping):
-        """Honor data class field metadata."""
-        if FROM_ENV in metadata:
-            value.var_name = str(metadata[FROM_ENV])
+    @staticmethod
+    def _resolve_metadata(data: Value, field: dataclasses.Field) -> Metadata | None:
+        """Resolve value metadata."""
+        if FROM_ENV not in field.metadata:
+            return None
+        metadata = field.metadata[FROM_ENV]
+        if metadata is None:
+            return None
+        elif isinstance(metadata, str):
+            return Metadata(name=metadata)
+        elif isinstance(metadata, Metadata):
+            return metadata
+        raise TypeError(f"Unexpected type for field metadata: {data.qual_name}.{field.name}: {type(metadata)}")
 
     def is_present(self, env: VarBinding, value: Value, strategy: Strategy) -> bool:
         """Check if required fields are present."""
@@ -191,9 +204,9 @@ class DataClassLoader(Loader):
 class UnionLoader(Loader):
     """Loader to handle Union-types."""
 
-    def can_load(self, value_type: Type) -> bool:
+    def can_load(self, value: Value) -> bool:
         """Check if this is a union class."""
-        origin = typing.get_origin(value_type)
+        origin = typing.get_origin(value.type)
         return origin is typing.Union or origin is types.UnionType
 
     def load(self, env: VarBinding, value: Value, strategy: Strategy) -> Any:
@@ -220,10 +233,10 @@ class UnionLoader(Loader):
 class ListLoader(Loader):
     """List loader."""
 
-    def can_load(self, value_type: Type) -> bool:
+    def can_load(self, value: Value) -> bool:
         """Check if the value type is list."""
-        origin = typing.get_origin(value_type)
-        return value_type == list or origin is list or origin is List or origin is typing.Sequence
+        origin = typing.get_origin(value.type)
+        return value == list or origin is list or origin is List or origin is typing.Sequence
 
     def load(self, env: VarBinding, value: Value, strategy: Strategy) -> List:
         """Do load list value."""
@@ -255,10 +268,10 @@ class ListLoader(Loader):
 class TupleLoader(Loader):
     """Tuple loader."""
 
-    def can_load(self, value_type: Type) -> bool:
+    def can_load(self, value: Value) -> bool:
         """Check if value type is tuple."""
-        origin = typing.get_origin(value_type)
-        return value_type == tuple or origin is tuple or origin is typing.Tuple
+        origin = typing.get_origin(value.type)
+        return value == tuple or origin is tuple or origin is typing.Tuple
 
     def load(self, env: VarBinding, value: Value, strategy: Strategy) -> Any:
         """Do load the tuple."""
@@ -304,9 +317,9 @@ class TupleLoader(Loader):
 class OptionalLoader(Loader):
     """Optional type loader."""
 
-    def can_load(self, value_type: Type) -> bool:
+    def can_load(self, value: Value) -> bool:
         """Check if type is optional."""
-        return OptionalTypes.is_optional(value_type)
+        return OptionalTypes.is_optional(value.type)
 
     def load(self, env: VarBinding, value: Value, strategy: Strategy) -> Any:
         """Load optional value."""
@@ -325,7 +338,25 @@ class OptionalLoader(Loader):
         return loader.is_present(env, actual_value, strategy)
 
 
+class CustomLoader(Loader):
+    """Loader that uses the `load` function from metadata to parse the value."""
+
+    def can_load(self, value: Value) -> bool:
+        """Check if custom loader is defined."""
+        return value.metadata is not None and value.metadata.load is not None
+
+    def load(self, env: VarBinding, value: Value, strategy: Strategy) -> Any:
+        """Do load the value with a custom loader."""
+        env.bind(value)
+        return value.metadata.load(env.vars[value.var_name])
+
+    def is_present(self, env: VarBinding, value: Value, strategy: Strategy) -> bool:
+        """Check if the corresponding variable is defined."""
+        return value.var_name in env.vars
+
+
 DEFAULT_LOADERS: Tuple[Loader, ...] = (
+    CustomLoader(),
     OptionalLoader(),
     BasicValueLoader(int),
     BasicValueLoader(float),
