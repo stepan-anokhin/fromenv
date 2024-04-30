@@ -4,8 +4,9 @@ import types
 import typing
 from abc import abstractmethod
 from collections.abc import Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Type, Any, Dict, Sequence, Tuple, List
+from typing import Type, Any, Dict, Sequence, Tuple, List, Iterator
 
 from fromenv.consts import FROM_ENV
 from fromenv.errors import UnsupportedValueType, MissingRequiredVar, AmbiguousVarError
@@ -79,6 +80,13 @@ class Strategy:
 
 
 @dataclass
+class BindingChanges:
+    """Summary of changes in value bindings."""
+
+    footprint: int  # Amount of variables consumed
+
+
+@dataclass
 class VarBinding:
     """Environment variables mapped to the corresponding values."""
 
@@ -97,6 +105,15 @@ class VarBinding:
                 f"\n\t2. {value.qual_name}"
             )
         self.bound[value.var_name] = value
+
+    @contextmanager
+    def track_changes(self) -> Iterator[BindingChanges]:
+        """Track binding changes."""
+        bound_before: int = len(self.bound)
+        changes = BindingChanges(0)
+        yield changes
+        bound_after: int = len(self.bound)
+        changes.footprint = bound_after - bound_before
 
 
 class Loader(abc.ABC):
@@ -167,15 +184,20 @@ class DataClassLoader(Loader):
             field_value = strategy.child_value(value, field.name, field.type, metadata)
             field_loader = strategy.resolve_loader(field_value)
             is_present = field_loader.is_present(env, field_value, strategy)
-            is_optional = OptionalTypes.is_optional(field_value.type)
-            if DataClasses.is_required(field) and not is_optional and not is_present:
+            is_nullable = OptionalTypes.is_optional(field_value.type)
+
+            if DataClasses.is_required(field) and not is_nullable and not is_present:
                 raise MissingRequiredVar(
                     f"Variable is missing: {field_value.var_name} " f"(required for {field_value.qual_name})"
                 )
-            if DataClasses.is_required(field) and is_optional and not is_present:
+            elif DataClasses.is_required(field) and is_nullable and not is_present:
                 constructor_arguments[field.name] = None
-            if is_present:
-                constructor_arguments[field.name] = field_loader.load(env, field_value, strategy)
+            elif is_present:
+                with env.track_changes() as changes:
+                    loaded_value = field_loader.load(env, field_value, strategy)
+                if not DataClasses.is_required(field) and changes.footprint == 0:
+                    loaded_value = DataClasses.default_value(field)
+                constructor_arguments[field.name] = loaded_value
         return data_class(**constructor_arguments)
 
     @staticmethod
@@ -327,7 +349,10 @@ class OptionalLoader(Loader):
         actual_value = dataclasses.replace(value, type=actual_type)
         loader = strategy.resolve_loader(actual_value)
         if loader.is_present(env, actual_value, strategy):
-            return loader.load(env, actual_value, strategy)
+            with env.track_changes() as changes:
+                loaded_value = loader.load(env, actual_value, strategy)
+            if changes.footprint > 0:
+                return loaded_value
         return None
 
     def is_present(self, env: VarBinding, value: Value, strategy: Strategy) -> bool:

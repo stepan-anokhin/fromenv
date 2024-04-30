@@ -201,3 +201,87 @@ def test_custom_loader():
         field_name: List[int] = dataclasses.field(metadata={"fromenv": Metadata(load=json.loads)})
 
     assert from_env(TestData, {"FIELD_NAME": "[1, 2, 3]"}) == TestData([1, 2, 3])
+
+
+def test_optional_fixed_tuple_item():
+    @dataclass
+    class TestData:
+        tuple: tuple[int | None, str | None, bool | None] | None
+
+    assert from_env(TestData, {}).tuple is None
+    assert from_env(TestData, {"TUPLE_0": "42"}).tuple == (42, None, None)
+    assert from_env(TestData, {"TUPLE_1": "specified"}).tuple == (None, "specified", None)
+    assert from_env(TestData, {"TUPLE_2": "true"}).tuple == (None, None, True)
+
+
+def test_optional_nested():
+    @dataclass
+    class Nested:
+        attr: str | None
+
+    @dataclass
+    class TestData:
+        nested: Nested | None
+
+    assert from_env(TestData, {}).nested is None
+    assert from_env(TestData, {"NESTED_ATTR": "specified"}).nested.attr == "specified"
+
+
+def test_optional_list_items():
+
+    @dataclass
+    class Item:
+        attr: str | None
+
+    @dataclass
+    class TestData:
+        list: List[Item | None]
+
+    assert from_env(TestData, {}).list == []
+    assert from_env(TestData, {"LIST_1_ATTR": "specified"}).list == []
+    assert from_env(TestData, {"LIST_0_ATTR": "specified"}).list == [Item("specified")]
+
+
+def test_optional_list_of_optional_items():
+
+    @dataclass
+    class Item:
+        attr: str | None
+
+    @dataclass
+    class TestData:
+        list: List[Item | None] | None
+
+    assert from_env(TestData, {}).list is None
+    assert from_env(TestData, {"LIST_1_ATTR": "specified"}).list is None
+    assert from_env(TestData, {"LIST_0_ATTR": "specified"}).list == [Item("specified")]
+
+
+def test_optional_default_tuple():
+
+    @dataclass
+    class Item:
+        attr: str | None
+
+    default: tuple[Item | None, Item | None] = (Item("default-0"), Item("default-1"))
+
+    @dataclass
+    class TestData:
+        tuple_value: tuple[Item | None, Item | None] | None = default
+
+    assert from_env(TestData, {}).tuple_value == default
+
+
+def test_optional_field_with_default_value():
+    @dataclass
+    class Nested:
+        optional: str | None
+
+    default = Nested("default")
+
+    @dataclass
+    class TestData:
+        nested: Nested | None = default
+        optional: str | None = "default"
+
+    assert from_env(TestData, {}) == TestData(default, "default")

@@ -23,3 +23,12 @@ class DataClasses:
     def required_fields(data_class: Type) -> Iterable[dataclasses.Field]:
         """Iterate over required fields."""
         return filter(DataClasses.is_required, dataclasses.fields(data_class))
+
+    @staticmethod
+    def default_value(field: dataclasses.Field):
+        """Get default value."""
+        if field.default is not dataclasses.MISSING:
+            return field.default
+        if field.default_factory is not dataclasses.MISSING:
+            return field.default_factory()
+        raise ValueError(f"Field {field} doesn't have default value.")
