@@ -3,7 +3,9 @@ import json
 from dataclasses import dataclass
 from typing import Union, List, Tuple, Optional
 
-from fromenv import from_env
+import pytest
+
+from fromenv import from_env, MissingRequiredVar
 from fromenv.model import Metadata
 
 
@@ -119,6 +121,52 @@ def test_var_tuple():
     ).nested_tuple == (ItemType(0), ItemType(1, "specified"))
 
     assert from_env(TestData, {"BASIC_TUPLE_0": "100", "BASIC_TUPLE_1": "200"}).basic_tuple == (100, 200)
+
+
+def test_fixed_tuple():
+    @dataclass
+    class TestData:
+        first: Tuple[int, str, bool]
+        second: tuple[int, str, bool]
+
+    assert from_env(
+        TestData,
+        {
+            "FIRST_0": "100",
+            "FIRST_1": "first-str",
+            "FIRST_2": "false",
+            "SECOND_0": "200",
+            "SECOND_1": "second-str",
+            "SECOND_2": "true",
+        },
+    ) == TestData((100, "first-str", False), (200, "second-str", True))
+
+
+def test_incomplete_tuple():
+    @dataclass
+    class TestData:
+        field: tuple[int, str, bool] = (0, "", False)
+
+    with pytest.raises(MissingRequiredVar):
+        from_env(TestData, {"FIELD_0": "100", "FIELD_1": "specified"})
+
+
+def test_nested_tuples():
+    @dataclass
+    class TestData:
+        tuple: Tuple[int, str, Tuple[int, str, Tuple[str, ...]]]
+
+    assert from_env(
+        TestData,
+        {
+            "TUPLE_0": "0",
+            "TUPLE_1": "str-outer",
+            "TUPLE_2_0": "1",
+            "TUPLE_2_1": "str-nested",
+            "TUPLE_2_2_0": "str-deepest-1",
+            "TUPLE_2_2_1": "str-deepest-2",
+        },
+    ).tuple == (0, "str-outer", (1, "str-nested", ("str-deepest-1", "str-deepest-2")))
 
 
 def test_optional():
