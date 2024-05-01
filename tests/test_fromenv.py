@@ -145,10 +145,22 @@ def test_fixed_tuple():
     ) == TestData((100, "first-str", False), (200, "second-str", True))
 
 
-def test_incomplete_tuple():
+def test_incomplete_fixed_tuple_with_default():
+
+    default = (0, "", False)
+
     @dataclass
     class TestData:
-        field: tuple[int, str, bool] = (0, "", False)
+        field: tuple[int, str, bool] = default
+
+    assert from_env(TestData, {"FIELD_0": "100", "FIELD_1": "specified"}).field == default
+
+
+def test_incomplete_fixed_tuple_without_default():
+
+    @dataclass
+    class TestData:
+        field: tuple[int, str, bool]
 
     with pytest.raises(MissingRequiredVar):
         from_env(TestData, {"FIELD_0": "100", "FIELD_1": "specified"})
