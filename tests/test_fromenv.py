@@ -106,6 +106,28 @@ def test_prefix():
         from_env(TestData, {"VALUE": "anything"}, config)
 
 
+def test_custom_separator():
+
+    @dataclass
+    class Nested:
+        value: str
+
+    @dataclass
+    class TestData:
+        nested: Nested
+        list: List[int]
+
+    config = Config(sep="__")
+    env = {
+        "NESTED__VALUE": "specified",
+        "LIST__0": "1",
+        "LIST__1": "2",
+    }
+    assert from_env(TestData, env, config) == TestData(Nested("specified"), [1, 2])
+    with pytest.raises(MissingRequiredVar):
+        from_env(TestData, {"NESTED_VALUE": "whatever"}, config)
+
+
 def test_nested():
     @dataclass
     class Nested:
@@ -125,10 +147,56 @@ def test_nested():
 def test_default():
     @dataclass
     class TestData:
-        optional: str = "default"
+        value: str = "default"
 
-    assert from_env(TestData, {}).optional == "default"
-    assert from_env(TestData, {"OPTIONAL": "specified"}).optional == "specified"
+    assert from_env(TestData, {}).value == "default"
+    assert from_env(TestData, {"VALUE": "specified"}).value == "specified"
+
+
+def test_list_basic():
+    @dataclass
+    class TestData:
+        list: List[int]
+
+    assert from_env(TestData, {"LIST_0": "1", "LIST_1": "2"}).list == [1, 2]
+    assert from_env(TestData, {}).list == []
+
+
+def test_list_nullable():
+    @dataclass
+    class TestData:
+        list: list[int] | None
+
+    assert from_env(TestData, {"LIST_0": "1", "LIST_1": "2"}).list == [1, 2]
+    assert from_env(TestData, {}).list is None
+
+
+def test_list_of_objects():
+    @dataclass
+    class Item:
+        value: int | None
+
+    @dataclass
+    class TestData:
+        list: list[Item]
+
+    assert from_env(TestData, {}).list == []
+    assert from_env(TestData, {"LIST_0_VALUE": "1", "LIST_1_VALUE": "2"}).list == [Item(1), Item(2)]
+
+
+def test_defaults():
+    @dataclass
+    class Nested:
+        value: str | None = "default-1"
+
+    @dataclass
+    class TestData:
+        required: Nested
+        nullable: Nested | None
+        default: Nested = Nested("default-2")
+        default_nullable: Nested | None = Nested("default-3")
+
+    assert from_env(TestData, {}) == TestData(Nested(), None, Nested("default-2"), Nested("default-3"))
 
 
 def test_union():
