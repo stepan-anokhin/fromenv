@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Type, Any, Dict, Sequence, Tuple, List, Iterator
 
 from fromenv.consts import FROM_ENV
-from fromenv.errors import UnsupportedValueType, MissingRequiredVar, AmbiguousVarError
+from fromenv.errors import UnsupportedValueType, MissingRequiredVar, AmbiguousVarError, UnionLoadingError
 from fromenv.internal.helpers.data_classes import DataClasses
 from fromenv.internal.helpers.optionals import OptionalTypes
 from fromenv.internal.helpers.tuples import Tuples
@@ -54,7 +54,7 @@ class Strategy:
         for loader in self.loaders:
             if loader.can_load(value):
                 return loader
-        raise UnsupportedValueType(f"Unsupported type: {value.type} of a field {value.qual_name}")
+        raise UnsupportedValueType(qual_name=value.qual_name, value_type=value.type)
 
     def root_value(self, data_class: Type) -> Value:
         """Create a root value."""
@@ -95,14 +95,10 @@ class VarBinding:
     def bind(self, value: Value):
         """Bind variable to the given value"""
         if value.var_name not in self.vars:
-            raise MissingRequiredVar(f"Variable '{value.var_name}' not found for required value: {value.qual_name}")
+            raise MissingRequiredVar(value.var_name, value.qual_name)
         if value.var_name in self.bound:
             other = self.bound[value.var_name]
-            raise AmbiguousVarError(
-                f"Variable '{value.var_name}' is matched to multiple values:"
-                f"\n\t1. {other.qual_name}"
-                f"\n\t2. {value.qual_name}"
-            )
+            raise AmbiguousVarError(value.var_name, other.qual_name, value.qual_name)
         self.bound[value.var_name] = value
 
     @contextmanager
@@ -276,9 +272,7 @@ class UnionLoader(Loader):
             loader = strategy.resolve_loader(casted)
             if loader.is_present(env, casted, strategy):
                 return loader.load(env, casted, strategy)
-        raise MissingRequiredVar(
-            f"Failed to load {value.qual_name} because none of the {value.type} types are present."
-        )
+        raise UnionLoadingError(qual_name=value.qual_name, value_type=value.type)
 
     def is_present(self, env: VarBinding, value: Value, strategy: Strategy) -> bool:
         """Check if some of the united types could be loaded."""
@@ -326,7 +320,7 @@ class ListLoader(Loader):
         """Get item type."""
         type_args: Tuple[Type, ...] = typing.get_args(value.type)
         if not type_args:
-            raise UnsupportedValueType(f"Cannot load untyped list: {value.qual_name}:{value.type}")
+            raise UnsupportedValueType(qual_name=value.qual_name, value_type=value.type)
         return type_args[0]
 
     def is_present(self, env: VarBinding, value: Value, strategy: Strategy) -> bool:
