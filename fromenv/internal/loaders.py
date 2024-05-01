@@ -11,7 +11,6 @@ from typing import Type, Any, Dict, Sequence, Tuple, List, Iterator
 from fromenv.consts import FROM_ENV
 from fromenv.errors import UnsupportedValueType, MissingRequiredVar, AmbiguousVarError
 from fromenv.internal.helpers.data_classes import DataClasses
-from fromenv.internal.helpers.dicts import Dicts
 from fromenv.internal.helpers.optionals import OptionalTypes
 from fromenv.internal.helpers.tuples import Tuples
 from fromenv.model import Metadata
@@ -121,7 +120,7 @@ class Loader(abc.ABC):
 
     @abstractmethod
     def can_load(self, value: Value) -> bool:
-        """Check if loader can handle value type."""
+        """Check if loader can handle the value."""
 
     @abstractmethod
     def load(self, env: VarBinding, value: Value, strategy: Strategy) -> Any:
@@ -129,11 +128,16 @@ class Loader(abc.ABC):
 
     @abstractmethod
     def is_present(self, env: VarBinding, value: Value, strategy: Strategy) -> bool:
-        """Check if variables representing the given value are defined."""
+        """Check if ALL variables required to successfully load the value are defined."""
 
 
 class BasicValueLoader(Loader):
-    """Base class for basic value loaders."""
+    """Loader for basic value types.
+
+    This is one of the loaders that actually consumes env variables
+    to load the value. Basic value is assumed to be atomic so the
+    loader always consumes exactly 1 variable.
+    """
 
     type: Type
 
@@ -156,7 +160,7 @@ class BasicValueLoader(Loader):
 
 
 class BooleanLoader(BasicValueLoader):
-    """Boolean value loader."""
+    """A basic value loader for boolean values."""
 
     def __init__(self):
         super().__init__(bool)
@@ -164,8 +168,33 @@ class BooleanLoader(BasicValueLoader):
     def load(self, env: VarBinding, value: Value, strategy: Strategy) -> bool:
         """Load boolean value."""
         env.bind(value)
-        raw_value: str = env.vars[value.var_name]
-        return raw_value.upper() == "TRUE" or raw_value == "1"
+        raw_value: str = env.vars[value.var_name].upper()
+        normalized: str = raw_value.upper().strip()
+        if normalized == "TRUE" or normalized == "1" or normalized == "YES":
+            return True
+        elif normalized == "FALSE" or normalized == "0" or normalized == "NO":
+            return False
+        raise ValueError(f"Invalid boolean format of variable {value.var_name}: {raw_value} (field: {value.qual_name})")
+
+
+class CustomLoader(Loader):
+    """Loader for values with custom user-specified formats.
+
+    The loader uses the `load` attribute of the field metadata.
+    """
+
+    def can_load(self, value: Value) -> bool:
+        """Check if custom loader is defined."""
+        return value.metadata is not None and value.metadata.load is not None
+
+    def load(self, env: VarBinding, value: Value, strategy: Strategy) -> Any:
+        """Do load the value with a custom loader."""
+        env.bind(value)
+        return value.metadata.load(env.vars[value.var_name])
+
+    def is_present(self, env: VarBinding, value: Value, strategy: Strategy) -> bool:
+        """Check if the corresponding variable is defined."""
+        return value.var_name in env.vars
 
 
 class DataClassLoader(Loader):
@@ -184,20 +213,28 @@ class DataClassLoader(Loader):
             field_value = strategy.child_value(value, field.name, field.type, metadata)
             field_loader = strategy.resolve_loader(field_value)
             is_present = field_loader.is_present(env, field_value, strategy)
-            is_nullable = OptionalTypes.is_optional(field_value.type)
+            has_default = DataClasses.has_default(field)
+            if has_default and not is_present:
+                continue
 
-            if DataClasses.is_required(field) and not is_nullable and not is_present:
-                raise MissingRequiredVar(
-                    f"Variable is missing: {field_value.var_name} " f"(required for {field_value.qual_name})"
-                )
-            elif DataClasses.is_required(field) and is_nullable and not is_present:
-                constructor_arguments[field.name] = None
-            elif is_present:
-                with env.track_changes() as changes:
-                    loaded_value = field_loader.load(env, field_value, strategy)
-                if not DataClasses.is_required(field) and changes.footprint == 0:
-                    loaded_value = DataClasses.default_value(field)
-                constructor_arguments[field.name] = loaded_value
+            # If the field is required but not present, it should raise exception by any of
+            # the atomic value loaders, so the error message will be as specific as possible.
+            # That's why we shouldn't raise MissingRequiredVar exception here and should
+            # always try to load the value instead.
+
+            with env.track_changes() as changes:
+                loaded_value = field_loader.load(env, field_value, strategy)
+
+            # Some of the value types (like nullables and lists) may be successfully loaded
+            # without consuming any environment variables. In such cases the  produced value
+            # is type-specific default. On the other hand the data-class field may also
+            # specify its own default value. In this case field-specific default must be
+            # used instead of type-specific default:
+
+            if changes.footprint == 0 and has_default:
+                loaded_value = DataClasses.default_value(field)
+
+            constructor_arguments[field.name] = loaded_value
         return data_class(**constructor_arguments)
 
     @staticmethod
@@ -218,7 +255,8 @@ class DataClassLoader(Loader):
         """Check if required fields are present."""
         for field in DataClasses.required_fields(value.type):
             field_value = strategy.child_value(value, field.name, field.type)
-            if not Dicts.any(env.vars, query=Dicts.prefix(field_value.var_name)):
+            field_loader = strategy.resolve_loader(field_value)
+            if not field_loader.is_present(env, field_value, strategy):
                 return False
         return True
 
@@ -268,8 +306,8 @@ class ListLoader(Loader):
         current_item: Value = strategy.child_value(value, current_index, item_type)
         item_loader: Loader = strategy.resolve_loader(current_item)
         while item_loader.is_present(env, current_item, strategy):
-            loaded_item = item_loader.load(env, current_item, strategy)
-            items.append(loaded_item)
+            loaded_item_value = item_loader.load(env, current_item, strategy)
+            items.append(loaded_item_value)
             current_index += 1
             current_item = strategy.child_value(value, current_index, item_type)
         return items
@@ -287,57 +325,63 @@ class ListLoader(Loader):
         return True  # List may be empty in which case it is also present.
 
 
-class TupleLoader(Loader):
-    """Tuple loader."""
+class FixedLengthTupleLoader(Loader):
+    """Fixed-length tuples loader."""
+
+    def can_load(self, value: Value) -> bool:
+        """Check if value is a fixed-length tuple."""
+        return Tuples.is_fixed(value.type)
+
+    def load(self, env: VarBinding, value: Value, strategy: Strategy) -> Any:
+        """Do load fixed-length tuple."""
+        items: List[Any] = []
+        item_types = typing.get_args(value.type)
+        for index, item_type in enumerate(item_types):
+            item = strategy.child_value(value, index, item_type)
+            item_loader = strategy.resolve_loader(item)
+            loaded_value = item_loader.load(env, item, strategy)
+            items.append(loaded_value)
+        return tuple(items)
+
+    def is_present(self, env: VarBinding, value: Value, strategy: Strategy) -> bool:
+        """Check if fixed-length tuple is correctly represented by the variables."""
+        item_types = typing.get_args(value.type)
+        for index, item_type in enumerate(item_types):
+            item = strategy.child_value(value, index, item_type)
+            item_loader = strategy.resolve_loader(item)
+            if not item_loader.is_present(env, item, strategy):
+                return False
+        return True
+
+
+class AnyLengthTupleLoader(Loader):
+    """Any-length tuples loader."""
 
     def can_load(self, value: Value) -> bool:
         """Check if value type is tuple."""
-        origin = typing.get_origin(value.type)
-        return value == tuple or origin is tuple or origin is typing.Tuple
+        return Tuples.is_any_length(value.type)
 
     def load(self, env: VarBinding, value: Value, strategy: Strategy) -> Any:
         """Do load the tuple."""
-        if Tuples.is_variable(value.type):
-            return self._load_variable_tuple(env, value, strategy)
-        elif Tuples.is_fixed(value.type):
-            return self._load_fixed_tuple(env, value, strategy)
-        elif Tuples.is_untyped(value.type):
-            raise UnsupportedValueType(f"Cannot load untyped tuple: {value.qual_name}:{value.type}")
-        raise ValueError(f"Not a tuple type: {value.type}")
-
-    @staticmethod
-    def _load_variable_tuple(env: VarBinding, value: Value, strategy: Strategy) -> Any:
-        """Load tuple of any length."""
         item_type = Tuples.item_type(value.type)
         current_index: int = 0
         current_item: Value = strategy.child_value(value, current_index, item_type)
         item_loader: Loader = strategy.resolve_loader(current_item)
         items: List[Any] = []
         while item_loader.is_present(env, current_item, strategy):
-            item_value = item_loader.load(env, current_item, strategy)
-            items.append(item_value)
+            loaded_item_value = item_loader.load(env, current_item, strategy)
+            items.append(loaded_item_value)
             current_index += 1
             current_item: Value = strategy.child_value(value, current_index, item_type)
         return tuple(items)
 
-    @staticmethod
-    def _load_fixed_tuple(env: VarBinding, value: Value, strategy: Strategy) -> Any:
-        """Load tuple of any length."""
-        items: List[Any] = []
-        item_types = typing.get_args(value.type)
-        for index, item_type in enumerate(item_types):
-            item = strategy.child_value(value, index, item_type)
-            item_loader = strategy.resolve_loader(item)
-            items.append(item_loader.load(env, item, strategy))
-        return tuple(items)
-
     def is_present(self, env: VarBinding, value: Value, strategy: Strategy) -> bool:
         """Check if tuple is present."""
-        return True  # Tuple may be empty in which case it is also present
+        return True  # Tuple may be empty in which case no variables are required
 
 
 class OptionalLoader(Loader):
-    """Optional type loader."""
+    """Optional value loader."""
 
     def can_load(self, value: Value) -> bool:
         """Check if type is optional."""
@@ -351,33 +395,18 @@ class OptionalLoader(Loader):
         if loader.is_present(env, actual_value, strategy):
             with env.track_changes() as changes:
                 loaded_value = loader.load(env, actual_value, strategy)
+
+            # The actual child-type may have its own type-specific default value.
+            # In such a case the optional value must be None.
+
             if changes.footprint > 0:
                 return loaded_value
+
         return None
 
     def is_present(self, env: VarBinding, value: Value, strategy: Strategy) -> bool:
         """Check if value is present."""
-        actual_type = OptionalTypes.remove_optional(value.type)
-        actual_value = dataclasses.replace(value, type=actual_type)
-        loader = strategy.resolve_loader(actual_value)
-        return loader.is_present(env, actual_value, strategy)
-
-
-class CustomLoader(Loader):
-    """Loader that uses the `load` function from metadata to parse the value."""
-
-    def can_load(self, value: Value) -> bool:
-        """Check if custom loader is defined."""
-        return value.metadata is not None and value.metadata.load is not None
-
-    def load(self, env: VarBinding, value: Value, strategy: Strategy) -> Any:
-        """Do load the value with a custom loader."""
-        env.bind(value)
-        return value.metadata.load(env.vars[value.var_name])
-
-    def is_present(self, env: VarBinding, value: Value, strategy: Strategy) -> bool:
-        """Check if the corresponding variable is defined."""
-        return value.var_name in env.vars
+        return True  # Optional value may be loaded without consuming any variables
 
 
 DEFAULT_LOADERS: Tuple[Loader, ...] = (
@@ -390,5 +419,6 @@ DEFAULT_LOADERS: Tuple[Loader, ...] = (
     DataClassLoader(),
     UnionLoader(),
     ListLoader(),
-    TupleLoader(),
+    FixedLengthTupleLoader(),
+    AnyLengthTupleLoader(),
 )

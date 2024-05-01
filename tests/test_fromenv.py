@@ -41,10 +41,13 @@ def test_bool():
     assert from_env(TestData, {"BOOL_VALUE": "true"}).bool_value is True
     assert from_env(TestData, {"BOOL_VALUE": "TrUe"}).bool_value is True
     assert from_env(TestData, {"BOOL_VALUE": "1"}).bool_value is True
+    assert from_env(TestData, {"BOOL_VALUE": "yes"}).bool_value is True
     assert from_env(TestData, {"BOOL_VALUE": "FALSE"}).bool_value is False
     assert from_env(TestData, {"BOOL_VALUE": "faLSe"}).bool_value is False
     assert from_env(TestData, {"BOOL_VALUE": "0"}).bool_value is False
-    assert from_env(TestData, {"BOOL_VALUE": "whatever"}).bool_value is False
+    assert from_env(TestData, {"BOOL_VALUE": "no"}).bool_value is False
+    with pytest.raises(ValueError):
+        from_env(TestData, {"BOOL_VALUE": "invalid"})
 
 
 def test_metadata():
@@ -285,3 +288,16 @@ def test_optional_field_with_default_value():
         optional: str | None = "default"
 
     assert from_env(TestData, {}) == TestData(default, "default")
+
+
+def test_default_tuple():
+    @dataclass
+    class TestData:
+        nullable_tuple_required_items: tuple[int, int] | None
+        nullable_items: tuple[int | None, int | None]
+        nullable_tuple: tuple[int | None, int | None] | None
+        nullable_default: tuple[int | None, int | None] | None = (1, 2)
+
+    assert from_env(TestData, {}) == TestData(
+        nullable_tuple_required_items=None, nullable_items=(None, None), nullable_tuple=None, nullable_default=(1, 2)
+    )

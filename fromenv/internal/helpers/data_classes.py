@@ -15,14 +15,14 @@ class DataClasses:
         return inspect.isclass(data_class) and dataclasses.is_dataclass(data_class)
 
     @staticmethod
-    def is_required(field: dataclasses.Field) -> bool:
-        """Check if the field value is required."""
-        return field.default is dataclasses.MISSING and field.default_factory is dataclasses.MISSING
+    def has_default(field: dataclasses.Field) -> bool:
+        """Check if the field has a default value."""
+        return not (field.default is dataclasses.MISSING and field.default_factory is dataclasses.MISSING)
 
     @staticmethod
     def required_fields(data_class: Type) -> Iterable[dataclasses.Field]:
         """Iterate over required fields."""
-        return filter(DataClasses.is_required, dataclasses.fields(data_class))
+        return (field for field in dataclasses.fields(data_class) if not DataClasses.has_default(field))
 
     @staticmethod
     def default_value(field: dataclasses.Field):

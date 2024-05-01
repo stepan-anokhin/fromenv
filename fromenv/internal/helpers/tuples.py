@@ -19,10 +19,12 @@ class Tuples:
     @staticmethod
     def is_fixed(value_type: Type) -> bool:
         """Check if type is a fixed-length tuple."""
-        return Tuples.is_tuple(value_type) and not Tuples.is_variable(value_type) and not Tuples.is_untyped(value_type)
+        return (
+            Tuples.is_tuple(value_type) and not Tuples.is_any_length(value_type) and not Tuples.is_untyped(value_type)
+        )
 
     @staticmethod
-    def is_variable(value_type: Type) -> bool:
+    def is_any_length(value_type: Type) -> bool:
         """Check if type is any-length tuple."""
         if not Tuples.is_tuple(value_type):
             return False
@@ -34,6 +36,6 @@ class Tuples:
     @staticmethod
     def item_type(value_type: Type) -> Type:
         """Get item type is a var-length tuple type."""
-        if not Tuples.is_variable(value_type):
+        if not Tuples.is_any_length(value_type):
             raise ValueError(f"Not a variable-length tuple type: {value_type}")
         return typing.get_args(value_type)[0]
