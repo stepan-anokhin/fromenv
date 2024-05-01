@@ -5,7 +5,7 @@ from typing import Union, List, Tuple, Optional, Dict
 
 import pytest
 
-from fromenv import from_env, MissingRequiredVar, Config
+from fromenv import from_env, MissingRequiredVar, Config, AmbiguousVarError
 from fromenv.errors import InvalidVariableFormat
 from fromenv.model import Metadata
 
@@ -151,6 +151,20 @@ def test_default():
 
     assert from_env(TestData, {}).value == "default"
     assert from_env(TestData, {"VALUE": "specified"}).value == "specified"
+
+
+def test_ambiguity():
+    @dataclass
+    class Nested:
+        value: str | None
+
+    @dataclass
+    class TestData:
+        nested: Nested
+        nested_value: str | None
+
+    with pytest.raises(AmbiguousVarError):
+        from_env(TestData, {"NESTED_VALUE": "specified"})
 
 
 def test_list_basic():

@@ -171,7 +171,7 @@ class BasicValueLoader(Loader):
 
     def is_present(self, env: VarBinding, value: Value, strategy: Strategy) -> bool:
         """Check if value is represented by the given environment variables."""
-        return value.var_name in env.vars and value.var_name not in env.bound
+        return value.var_name in env.vars
 
 
 class BooleanLoader(BasicValueLoader):
