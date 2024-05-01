@@ -306,7 +306,16 @@ class ListLoader(Loader):
         current_item: Value = strategy.child_value(value, current_index, item_type)
         item_loader: Loader = strategy.resolve_loader(current_item)
         while item_loader.is_present(env, current_item, strategy):
-            loaded_item_value = item_loader.load(env, current_item, strategy)
+            with env.track_changes() as changes:
+                loaded_item_value = item_loader.load(env, current_item, strategy)
+
+            # Continue until the next item could be loaded (i.e. it is present)
+            # AND until the item actually consumes environment variables.
+            # Otherwise, we may end up loading infinitely many type-specific
+            # default values for the list's item type.
+            if changes.footprint == 0:
+                break
+
             items.append(loaded_item_value)
             current_index += 1
             current_item = strategy.child_value(value, current_index, item_type)
@@ -369,7 +378,16 @@ class AnyLengthTupleLoader(Loader):
         item_loader: Loader = strategy.resolve_loader(current_item)
         items: List[Any] = []
         while item_loader.is_present(env, current_item, strategy):
-            loaded_item_value = item_loader.load(env, current_item, strategy)
+            with env.track_changes() as changes:
+                loaded_item_value = item_loader.load(env, current_item, strategy)
+
+            # Continue until the next item could be loaded (i.e. it is present)
+            # AND until the item actually consumes environment variables.
+            # Otherwise, we may end up loading infinitely many type-specific
+            # default values for the tuple's item type.
+            if changes.footprint == 0:
+                break
+
             items.append(loaded_item_value)
             current_index += 1
             current_item: Value = strategy.child_value(value, current_index, item_type)
