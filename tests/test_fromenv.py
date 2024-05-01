@@ -1,61 +1,124 @@
 import dataclasses
 import json
-from dataclasses import dataclass
-from typing import Union, List, Tuple, Optional
+from dataclasses import dataclass, field
+from typing import Union, List, Tuple, Optional, Dict
 
 import pytest
 
-from fromenv import from_env, MissingRequiredVar
+from fromenv import from_env, MissingRequiredVar, Config
+from fromenv.errors import InvalidVariableFormat
 from fromenv.model import Metadata
 
 
-def test_basic():
+def test_int_value():
     @dataclass
     class TestData:
         int_value: int
-        bool_value: bool
-        str_value: str
+
+    assert from_env(TestData, {"INT_VALUE": "42"}).int_value == 42
+    with pytest.raises(MissingRequiredVar):
+        from_env(TestData, {})
+    with pytest.raises(InvalidVariableFormat):
+        from_env(TestData, {"INT_VALUE": "invalid"})
+
+
+def test_float_value():
+    @dataclass
+    class TestData:
         float_value: float
 
-    env = {
-        "INT_VALUE": "42",
-        "BOOL_VALUE": "true",
-        "STR_VALUE": "anything",
-        "FLOAT_VALUE": "42.0",
-    }
-
-    values = from_env(TestData, env=env)
-
-    assert values.int_value == int(env["INT_VALUE"])
-    assert values.str_value == env["STR_VALUE"]
-    assert values.float_value == float(env["FLOAT_VALUE"])
-    assert values.bool_value == (env["BOOL_VALUE"].upper() == "TRUE")
+    assert from_env(TestData, {"FLOAT_VALUE": "4.2"}).float_value == 4.2
+    with pytest.raises(MissingRequiredVar):
+        from_env(TestData, {})
+    with pytest.raises(InvalidVariableFormat):
+        from_env(TestData, {"FLOAT_VALUE": "invalid"})
 
 
-def test_bool():
+def test_str_value():
+    @dataclass
+    class TestData:
+        str_value: str
+
+    assert from_env(TestData, {"STR_VALUE": "specified"}).str_value == "specified"
+    with pytest.raises(MissingRequiredVar):
+        from_env(TestData, {})
+
+
+def test_bool_value():
     @dataclass
     class TestData:
         bool_value: bool
 
-    assert from_env(TestData, {"BOOL_VALUE": "TRUE"}).bool_value is True
     assert from_env(TestData, {"BOOL_VALUE": "true"}).bool_value is True
     assert from_env(TestData, {"BOOL_VALUE": "TrUe"}).bool_value is True
-    assert from_env(TestData, {"BOOL_VALUE": "1"}).bool_value is True
     assert from_env(TestData, {"BOOL_VALUE": "yes"}).bool_value is True
-    assert from_env(TestData, {"BOOL_VALUE": "FALSE"}).bool_value is False
+    assert from_env(TestData, {"BOOL_VALUE": "1"}).bool_value is True
     assert from_env(TestData, {"BOOL_VALUE": "faLSe"}).bool_value is False
-    assert from_env(TestData, {"BOOL_VALUE": "0"}).bool_value is False
+    assert from_env(TestData, {"BOOL_VALUE": "FALSE"}).bool_value is False
     assert from_env(TestData, {"BOOL_VALUE": "no"}).bool_value is False
-    with pytest.raises(ValueError):
+    assert from_env(TestData, {"BOOL_VALUE": "0"}).bool_value is False
+    with pytest.raises(MissingRequiredVar):
+        from_env(TestData, {})
+    with pytest.raises(InvalidVariableFormat):
         from_env(TestData, {"BOOL_VALUE": "invalid"})
 
 
-def test_metadata():
+def test_custom_format():
     @dataclass
     class TestData:
-        some_field: str = dataclasses.field(metadata={"fromenv": "VAR_FROM_METADATA"})
+        json_value: List | Dict = field(metadata={"fromenv": Metadata(load=json.loads)})
 
-    assert from_env(TestData, {"VAR_FROM_METADATA": "expected"}).some_field == "expected"
+    assert from_env(TestData, {"JSON_VALUE": '[1,2,{"hello":"world"}]'}).json_value == [1, 2, {"hello": "world"}]
+    with pytest.raises(MissingRequiredVar):
+        from_env(TestData, {})
+    with pytest.raises(InvalidVariableFormat):
+        from_env(TestData, {"JSON_VALUE": "invalid[[[,,,"})
+
+
+def test_custom_var_name_short():
+    @dataclass
+    class TestData:
+        field_name: str = field(metadata={"fromenv": "OVERRIDE_NAME"})
+
+    assert from_env(TestData, {"OVERRIDE_NAME": "specified"}).field_name == "specified"
+    with pytest.raises(MissingRequiredVar):
+        from_env(TestData, {"FIELD_NAME": "anything"})
+
+
+def test_custom_var_name_via_metadata():
+    @dataclass
+    class TestData:
+        field_name: str = field(metadata={"fromenv": Metadata(name="OVERRIDE_NAME")})
+
+    assert from_env(TestData, {"OVERRIDE_NAME": "specified"}).field_name == "specified"
+    with pytest.raises(MissingRequiredVar):
+        from_env(TestData, {"FIELD_NAME": "anything"})
+
+
+def test_prefix():
+    @dataclass
+    class TestData:
+        value: str
+
+    config = Config(prefix="PREFIX")
+    assert from_env(TestData, {"PREFIX_VALUE": "specified"}, config).value == "specified"
+    with pytest.raises(MissingRequiredVar):
+        from_env(TestData, {"VALUE": "anything"}, config)
+
+
+def test_nested():
+    @dataclass
+    class Nested:
+        value: str
+
+    @dataclass
+    class TestData:
+        nested: Nested
+        value: str
+
+    assert from_env(TestData, {"NESTED_VALUE": "nested", "VALUE": "top-level"}) == TestData(
+        Nested("nested"), "top-level"
+    )
 
 
 def test_default():

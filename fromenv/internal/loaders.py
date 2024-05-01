@@ -9,7 +9,13 @@ from dataclasses import dataclass
 from typing import Type, Any, Dict, Sequence, Tuple, List, Iterator
 
 from fromenv.consts import FROM_ENV
-from fromenv.errors import UnsupportedValueType, MissingRequiredVar, AmbiguousVarError, UnionLoadingError
+from fromenv.errors import (
+    UnsupportedValueType,
+    MissingRequiredVar,
+    AmbiguousVarError,
+    UnionLoadingError,
+    InvalidVariableFormat,
+)
 from fromenv.internal.helpers.data_classes import DataClasses
 from fromenv.internal.helpers.optionals import OptionalTypes
 from fromenv.internal.helpers.tuples import Tuples
@@ -158,7 +164,10 @@ class BasicValueLoader(Loader):
         """Do load value."""
         env.bind(value)
         raw_value = env.vars[value.var_name]
-        return self.type(raw_value)
+        try:
+            return self.type(raw_value)
+        except ValueError as error:
+            raise InvalidVariableFormat(value.var_name, value.qual_name, cause=str(error))
 
     def is_present(self, env: VarBinding, value: Value, strategy: Strategy) -> bool:
         """Check if value is represented by the given environment variables."""
@@ -180,7 +189,7 @@ class BooleanLoader(BasicValueLoader):
             return True
         elif normalized == "FALSE" or normalized == "0" or normalized == "NO":
             return False
-        raise ValueError(f"Invalid boolean format of variable {value.var_name}: {raw_value} (field: {value.qual_name})")
+        raise InvalidVariableFormat(value.var_name, value.qual_name, cause=f"invalid boolean format: '{raw_value}'")
 
 
 class CustomLoader(Loader):
@@ -196,7 +205,10 @@ class CustomLoader(Loader):
     def load(self, env: VarBinding, value: Value, strategy: Strategy) -> Any:
         """Do load the value with a custom loader."""
         env.bind(value)
-        return value.metadata.load(env.vars[value.var_name])
+        try:
+            return value.metadata.load(env.vars[value.var_name])
+        except ValueError as error:
+            raise InvalidVariableFormat(value.var_name, value.qual_name, cause=str(error))
 
     def is_present(self, env: VarBinding, value: Value, strategy: Strategy) -> bool:
         """Check if the corresponding variable is defined."""

@@ -55,3 +55,24 @@ class UnionLoadingError(LoadingError):
         super().__init__(message or f"None of the union type alternatives could be loaded for {qual_name}")
         self.qual_name = qual_name
         self.value_type = value_type
+
+
+class InvalidVariableFormat(LoadingError, TypeError):
+    """Indicates that the variable value could not be parsed correctly."""
+
+    var_name: str
+    qual_name: str
+
+    def __init__(
+        self,
+        var_name: str,
+        qual_name: str,
+        cause: str | None = None,
+        message: str | None = None,
+    ):
+        cause_details = ""
+        if cause is not None:
+            cause_details = f": {cause}"
+        super().__init__(message or f"Could not parse '{var_name}' variable to load {qual_name}{cause_details}")
+        self.var_name = var_name
+        self.qual_name = qual_name
