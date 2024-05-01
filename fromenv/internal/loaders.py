@@ -82,6 +82,16 @@ class Strategy:
 class BindingChanges:
     """Summary of changes in value bindings."""
 
+    # The motivation behind the footprint is the following.
+    # Some of the value types may produce a type-specific
+    # default value. Examples are: optionals, empty lists,
+    # empty any-length tuples, data-class with all fields
+    # having default values, any combination of those, etc.
+    # In such cases type-specific default values are produced
+    # without binding any environment variables.
+    # There are certain cases in which we need to know if
+    # the value was produced without consuming any variables:
+
     footprint: int  # Amount of variables consumed
 
 
@@ -213,8 +223,8 @@ class DataClassLoader(Loader):
             if has_default and not is_present:
                 continue
 
-            # If the field is required but not present, it should raise exception by any of
-            # the atomic value loaders, so the error message will be as specific as possible.
+            # If the field is required but not present, exception should be raised by any of
+            # the downstream loaders, so the error message will be as specific as possible.
             # That's why we shouldn't raise MissingRequiredVar exception here and should
             # always try to load the value instead.
 
@@ -224,8 +234,8 @@ class DataClassLoader(Loader):
             # Some of the value types (like nullables and lists) may be successfully loaded
             # without consuming any environment variables. In such cases the  produced value
             # is type-specific default. On the other hand the data-class field may also
-            # specify its own default value. In this case field-specific default must be
-            # used instead of type-specific default:
+            # specify its own default value. In such case the field-specific default must be
+            # used instead of the type-specific one:
 
             if changes.footprint == 0 and has_default:
                 loaded_value = DataClasses.default_value(field)
