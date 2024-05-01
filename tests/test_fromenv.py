@@ -117,7 +117,8 @@ def test_nested():
         value: str
 
     assert from_env(TestData, {"NESTED_VALUE": "nested", "VALUE": "top-level"}) == TestData(
-        Nested("nested"), "top-level"
+        nested=Nested("nested"),
+        value="top-level",
     )
 
 
