@@ -167,6 +167,16 @@ def test_ambiguity():
         from_env(TestData, {"NESTED_VALUE": "specified"})
 
 
+def test_ambiguity_list():
+    @dataclass
+    class TestData:
+        list: List[int]
+        list_0: int | None
+
+    with pytest.raises(AmbiguousVarError):
+        from_env(TestData, {"LIST_0": "1"})
+
+
 def test_list_basic():
     @dataclass
     class TestData:
