@@ -223,6 +223,9 @@ def test_defaults():
     assert from_env(TestData, {}) == TestData(Nested(), None, Nested("default-2"), Nested("default-3"))
 
 
+# ----
+
+
 def test_union():
     @dataclass
     class TestData:

@@ -6,6 +6,7 @@ from abc import abstractmethod
 from collections.abc import Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
+from types import UnionType
 from typing import Type, Any, Dict, Sequence, Tuple, List, Iterator
 
 from fromenv.consts import FROM_ENV
@@ -47,7 +48,9 @@ class Strategy:
     config: Config
     loaders: Sequence["Loader"] = dataclasses.field(default_factory=lambda: DEFAULT_LOADERS)
 
-    def child_value(self, parent: Value, ref: Any, value_type: Type, metadata: Metadata | None = None) -> Value:
+    def child_value(
+        self, parent: Value, ref: Any, value_type: Type | UnionType, metadata: Metadata | None = None
+    ) -> Value:
         """Create child-value for the given one."""
         var_name = self.child_var_name(parent, ref)
         qual_name = self.child_qual_name(parent, ref)
@@ -82,6 +85,11 @@ class Strategy:
         if DataClasses.is_dataclass(parent.type):
             return f"{parent.qual_name}.{ref}"
         return f"{parent.qual_name}[{ref}]"
+
+    def load(self, env: "VarBinding", value: Value) -> Any:
+        """Shorthand method for loading values."""
+        loader: Loader = self.resolve_loader(value)
+        return loader.load(env, value, self)
 
 
 @dataclass
@@ -309,6 +317,8 @@ class UnionLoader(Loader):
 class ListLoader(Loader):
     """List loader."""
 
+    LENGTH_ATTR: str = "LEN"
+
     def can_load(self, value: Value) -> bool:
         """Check if the value type is list."""
         origin = typing.get_origin(value.type)
@@ -316,12 +326,16 @@ class ListLoader(Loader):
 
     def load(self, env: VarBinding, value: Value, strategy: Strategy) -> List:
         """Do load list value."""
+        # Check if length is specified explicitly
+        length_value = strategy.child_value(value, self.LENGTH_ATTR, int | None)
+        length: int | None = strategy.load(env, length_value)
+
         items: List = []
         item_type: Type = self._item_type(value)
         current_index: int = 0
         current_item: Value = strategy.child_value(value, current_index, item_type)
         item_loader: Loader = strategy.resolve_loader(current_item)
-        while item_loader.is_present(env, current_item, strategy):
+        while item_loader.is_present(env, current_item, strategy) or (length and current_index < length):
             with env.track_changes() as changes:
                 loaded_item_value = item_loader.load(env, current_item, strategy)
 
@@ -382,18 +396,24 @@ class FixedLengthTupleLoader(Loader):
 class AnyLengthTupleLoader(Loader):
     """Any-length tuples loader."""
 
+    LENGTH_ATTR: str = "LEN"
+
     def can_load(self, value: Value) -> bool:
         """Check if value type is tuple."""
         return Tuples.is_any_length(value.type)
 
     def load(self, env: VarBinding, value: Value, strategy: Strategy) -> Any:
         """Do load the tuple."""
+        # Check if length is specified explicitly
+        length_value = strategy.child_value(value, self.LENGTH_ATTR, int | None)
+        length: int | None = strategy.load(env, length_value)
+
         item_type = Tuples.item_type(value.type)
         current_index: int = 0
         current_item: Value = strategy.child_value(value, current_index, item_type)
         item_loader: Loader = strategy.resolve_loader(current_item)
         items: List[Any] = []
-        while item_loader.is_present(env, current_item, strategy):
+        while item_loader.is_present(env, current_item, strategy) or (length and current_index < length):
             with env.track_changes() as changes:
                 loaded_item_value = item_loader.load(env, current_item, strategy)
 
@@ -417,12 +437,22 @@ class AnyLengthTupleLoader(Loader):
 class OptionalLoader(Loader):
     """Optional value loader."""
 
+    IS_NONE: str = "IS_NONE__"
+
     def can_load(self, value: Value) -> bool:
         """Check if type is optional."""
         return OptionalTypes.is_optional(value.type)
 
     def load(self, env: VarBinding, value: Value, strategy: Strategy) -> Any:
         """Load optional value."""
+        # Check if optional value is explicitly set to None
+        is_none_value = strategy.child_value(value, OptionalLoader.IS_NONE, str)
+        is_none_loader = strategy.resolve_loader(is_none_value)
+        if is_none_loader.is_present(env, is_none_value, strategy):
+            is_none_loader.load(env, is_none_value, strategy)
+            return None
+
+        # Otherwise, load the optional value if it is present
         actual_type = OptionalTypes.remove_optional(value.type)
         actual_value = dataclasses.replace(value, type=actual_type)
         loader = strategy.resolve_loader(actual_value)
