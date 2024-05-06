@@ -50,17 +50,17 @@ def main():
 
 ### Context
 
-In general, we want that for every possible value V of any supported type T
+In general, we want that for every possible value `V` of any supported type `T`
 there should be such a combination of environment variables that will correspond
-exactly to this value V. We will call this desirable property a "completeness".
+exactly to this value `V`. We will call this desirable property a "completeness".
 And our goal is to make `from_env(T, env)` API "complete" in this sense.
 
 ### The Problem
 
-If some environment variables v1, ..., vn were used to load value V
-then we say that v1, ..., vn were "consumed" by the value V, and the
-full set {v1, ..., vn} of those variables we call a "footprint" of
-value V (and denote it "footprint(V)" throughout the documentation).
+If some environment variables $v\_1, ..., v\_n$ were used to load value V
+then we say that $v1, ..., vn$ were "consumed" by the value V, and the
+full set $\set{v\_1, ..., v\_n}$ of those variables we call a "footprint" of
+value `V` (and denote it $footprint(V)$ throughout the documentation).
 
 In some cases multiple values $V_1, ..., V_n$ of type `T` could be produced
 with $footprint(V_1) = ... = footprint(V_n) = \emptyset$. Such values
@@ -79,8 +79,8 @@ following ways to do that:
    If `VAR_NAME_<index>` variables are expected to represent
    list or tuple items, then we may set `VAR_NAME_LEN=0` to
    specify empty array or tuple.
-2. For `Optional[T]` to produce None we define "IS_NONE__" attribute:
+2. For `Optional[T]` to produce None we define `IS_NONE__` attribute:
    if `VAR_NAME` variable represents `Optional[T]` value, then
-   `VAR_NAME_IS_NONE__` variable indicates that None should be produced.
+   `VAR_NAME_IS_NONE__` variable indicates that `None` should be produced.
 3. For data class with all fields having default values simply explicitly
    specify default value for any field.
