@@ -110,3 +110,28 @@ def test_none_instead_of_field_default():
             "NESTED_IS_NONE__": "",
         },
     ) == TestData(list=None, string=None, tuple=None, nested=None)
+
+
+def test_type_default_instead_of_field_default_and_none():
+
+    @dataclass
+    class Nested:
+        value: str = "nested-default"
+
+    @dataclass
+    class TestData:
+        list: List[str] | None = field(default_factory=lambda: ["field", "default"])
+        string: str | None = "field-default"
+        tuple: Tuple[str, ...] | None = ("field", "default")
+        nested: Nested | None = Nested("field-default")
+
+    assert from_env(TestData, {}) == TestData()
+    assert from_env(
+        TestData,
+        {
+            "LIST_LEN": "0",
+            "STRING": "",
+            "TUPLE_LEN": "0",
+            "NESTED_VALUE": "nested-default",
+        },
+    ) == TestData(list=[], string="", tuple=(), nested=Nested())

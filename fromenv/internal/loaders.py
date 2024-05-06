@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from types import UnionType
-from typing import Type, Any, Dict, Sequence, Tuple, List, Iterator
+from typing import Type, Any, Dict, Sequence, Tuple, List, Iterator, TypeVar
 
 from fromenv.consts import FROM_ENV
 from fromenv.errors import (
@@ -149,6 +149,25 @@ class Loader(abc.ABC):
     @abstractmethod
     def is_present(self, env: VarBinding, value: Value, strategy: Strategy) -> bool:
         """Check if ALL variables required to successfully load the value are defined."""
+
+
+T = TypeVar("T")
+
+
+class LoadingHelper:
+    """Provides convenience methods for loaders."""
+
+    def __init__(self, env: VarBinding, value: Value, strategy: Strategy):
+        self.env: VarBinding = env
+        self.value: Value = value
+        self.strategy: Strategy = strategy
+
+    def load_if_present(self, child_ref: Any, child_type: Type[T]) -> T | None:
+        """Load child value if present."""
+        child_value = self.strategy.child_value(self.value, child_ref, child_type)
+        child_loader = self.strategy.resolve_loader(child_value)
+        if child_loader.is_present(self.env, child_value, self.strategy):
+            return child_loader.load(self.env, child_value, self.strategy)
 
 
 class BasicValueLoader(Loader):
@@ -327,28 +346,37 @@ class ListLoader(Loader):
     def load(self, env: VarBinding, value: Value, strategy: Strategy) -> List:
         """Do load list value."""
         # Check if length is specified explicitly
-        length_value = strategy.child_value(value, self.LENGTH_ATTR, int | None)
-        length: int | None = strategy.load(env, length_value)
+        helper = LoadingHelper(env, value, strategy)
+        length = helper.load_if_present(self.LENGTH_ATTR, int)
 
         items: List = []
         item_type: Type = self._item_type(value)
-        current_index: int = 0
-        current_item: Value = strategy.child_value(value, current_index, item_type)
-        item_loader: Loader = strategy.resolve_loader(current_item)
-        while item_loader.is_present(env, current_item, strategy) or (length and current_index < length):
-            with env.track_changes() as changes:
-                loaded_item_value = item_loader.load(env, current_item, strategy)
 
-            # Continue until the next item could be loaded (i.e. it is present)
-            # AND until the item actually consumes environment variables.
-            # Otherwise, we may end up loading infinitely many type-specific
-            # default values for the list's item type.
-            if changes.footprint == 0:
-                break
+        if length is not None:
+            # Load certain number of items
+            for current_index in range(length):
+                current_item: Value = strategy.child_value(value, current_index, item_type)
+                loaded_item_value = strategy.load(env, current_item)
+                items.append(loaded_item_value)
+        else:
+            current_index: int = 0
+            current_item: Value = strategy.child_value(value, current_index, item_type)
+            item_loader: Loader = strategy.resolve_loader(current_item)
 
-            items.append(loaded_item_value)
-            current_index += 1
-            current_item = strategy.child_value(value, current_index, item_type)
+            # Load items until present
+            while item_loader.is_present(env, current_item, strategy):
+                with env.track_changes() as changes:
+                    loaded_item_value = item_loader.load(env, current_item, strategy)
+
+                # Stop loading if value doesn't consume any environment variables.
+                # Otherwise, we may end up loading infinitely many type-specific
+                # default values (determined by the list's item type).
+                if changes.footprint == 0:
+                    break
+
+                items.append(loaded_item_value)
+                current_index += 1
+                current_item = strategy.child_value(value, current_index, item_type)
         return items
 
     @staticmethod
@@ -405,28 +433,37 @@ class AnyLengthTupleLoader(Loader):
     def load(self, env: VarBinding, value: Value, strategy: Strategy) -> Any:
         """Do load the tuple."""
         # Check if length is specified explicitly
-        length_value = strategy.child_value(value, self.LENGTH_ATTR, int | None)
-        length: int | None = strategy.load(env, length_value)
+        helper = LoadingHelper(env, value, strategy)
+        length = helper.load_if_present(self.LENGTH_ATTR, int)
 
-        item_type = Tuples.item_type(value.type)
-        current_index: int = 0
-        current_item: Value = strategy.child_value(value, current_index, item_type)
-        item_loader: Loader = strategy.resolve_loader(current_item)
-        items: List[Any] = []
-        while item_loader.is_present(env, current_item, strategy) or (length and current_index < length):
-            with env.track_changes() as changes:
-                loaded_item_value = item_loader.load(env, current_item, strategy)
+        items: List = []
+        item_type: Type = Tuples.item_type(value.type)
 
-            # Continue until the next item could be loaded (i.e. it is present)
-            # AND until the item actually consumes environment variables.
-            # Otherwise, we may end up loading infinitely many type-specific
-            # default values for the tuple's item type.
-            if changes.footprint == 0:
-                break
-
-            items.append(loaded_item_value)
-            current_index += 1
+        if length is not None:
+            # Load specified number of items
+            for current_index in range(length):
+                current_item: Value = strategy.child_value(value, current_index, item_type)
+                loaded_item_value = strategy.load(env, current_item)
+                items.append(loaded_item_value)
+        else:
+            current_index: int = 0
             current_item: Value = strategy.child_value(value, current_index, item_type)
+            item_loader: Loader = strategy.resolve_loader(current_item)
+
+            # Load items until present
+            while item_loader.is_present(env, current_item, strategy):
+                with env.track_changes() as changes:
+                    loaded_item_value = item_loader.load(env, current_item, strategy)
+
+                # Stop loading if value doesn't consume any environment variables.
+                # Otherwise, we may end up loading infinitely many type-specific
+                # default values (determined by the tuple's item type).
+                if changes.footprint == 0:
+                    break
+
+                items.append(loaded_item_value)
+                current_index += 1
+                current_item = strategy.child_value(value, current_index, item_type)
         return tuple(items)
 
     def is_present(self, env: VarBinding, value: Value, strategy: Strategy) -> bool:

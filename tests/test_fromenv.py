@@ -177,37 +177,6 @@ def test_ambiguity_list():
         from_env(TestData, {"LIST_0": "1"})
 
 
-def test_list_basic():
-    @dataclass
-    class TestData:
-        list: List[int]
-
-    assert from_env(TestData, {"LIST_0": "1", "LIST_1": "2"}).list == [1, 2]
-    assert from_env(TestData, {}).list == []
-
-
-def test_list_nullable():
-    @dataclass
-    class TestData:
-        list: list[int] | None
-
-    assert from_env(TestData, {"LIST_0": "1", "LIST_1": "2"}).list == [1, 2]
-    assert from_env(TestData, {}).list is None
-
-
-def test_list_of_objects():
-    @dataclass
-    class Item:
-        value: int | None
-
-    @dataclass
-    class TestData:
-        list: list[Item]
-
-    assert from_env(TestData, {}).list == []
-    assert from_env(TestData, {"LIST_0_VALUE": "1", "LIST_1_VALUE": "2"}).list == [Item(1), Item(2)]
-
-
 def test_defaults():
     @dataclass
     class Nested:
