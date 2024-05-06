@@ -50,17 +50,17 @@ def main():
 
 ### Context
 
-In general, we want that for every possible value `V` of any supported type `T`
+In general, we want that for every possible value $V$ of any supported type $T$
 there should be such a combination of environment variables that will correspond
-exactly to this value `V`. We will call this desirable property a "completeness".
+exactly to this value $V$. We will call this desirable property a "completeness".
 And our goal is to make `from_env(T, env)` API "complete" in this sense.
 
 ### The Problem
 
-If some environment variables $v\_1, ..., v\_n$ were used to load value V
-then we say that $v1, ..., vn$ were "consumed" by the value V, and the
+If some environment variables $v\_1, ..., v\_n$ were used to load value $V$
+then we say that $v1, ..., vn$ were "consumed" by the value $V$, and the
 full set $\set{v\_1, ..., v\_n}$ of those variables we call a "footprint" of
-value `V` (and denote it $footprint(V)$ throughout the documentation).
+value $V$ (and denote it $footprint(V)$ throughout the documentation).
 
 In some cases multiple values $V_1, ..., V_n$ of type `T` could be produced
 with $footprint(V_1) = ... = footprint(V_n) = \emptyset$. Such values
